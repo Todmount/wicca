@@ -1,0 +1,11 @@
+MODEL = 'model'
+PRE_INP = 'preprocess_input'
+DEC_PRED = 'decode_predictions'
+SHAPE = 'shape'
+ICON = 'icon'
+SOURCE = 'source'
+
+FILE = 'file'
+SIM_CLASSES = 'similar classes (count)'
+SIM_CLASSES_PERC = 'similar classes (%)'
+SIM_BEST_CLASS = 'similar best class'

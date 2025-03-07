@@ -1,30 +1,24 @@
+from abc import ABC, abstractmethod
 import cv2
 import numpy as np
+from typing import Optional
+
 
 from utility.loader import get_padded_copy
 
-class WaveletCoder:
+class WaveletCoder(ABC):
     """
-    A basic class for image compression based on multi-resolution analysis.
+    Abstract base class for image compression based on multi-resolution analysis.
     """
 
-    def __init__(self):
+    @abstractmethod
+    def get_small_copy(self, image: np.ndarray, transform_depth: int,
+                       border_type: int = cv2.BORDER_REPLICATE,
+                       border_constant: int = 0) -> np.ndarray:
+        """
+        Resize the image using wavelet transform.
+        """
         pass
-
-    def get_small_copy(self, image, transform_depth, border_type=cv2.BORDER_REPLICATE, border_constant=0):
-        """
-        Resize the image to fit within the specified dimensions while maintaining the aspect ratio.
-
-        Parameters:
-            image (numpy.ndarray): The input image.
-            transform_depth (int): The depth of the discrete wavelet transform (DWT).
-            border_type (int): The padding type.
-            border_constant (int): The padded value
-
-        Returns:
-            numpy.ndarray: Image small copy obtained using DWT of the specified depth
-        """
-        return None
 
 
 class HaarCoder(WaveletCoder):
@@ -36,27 +30,23 @@ class HaarCoder(WaveletCoder):
         super().__init__()
         self._ONE_STEP_RATIO = 2
 
-    def get_small_copy(self, image, transform_depth, border_type=cv2.BORDER_REPLICATE, border_constant=0):
-        """
-        Resize the image to fit within the specified dimensions while maintaining the aspect ratio.
+    def get_small_copy(self, image: np.ndarray, transform_depth: int,
+                       border_type: int = cv2.BORDER_REPLICATE,
+                       border_constant: int = 0) -> np.ndarray:
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Image must be a numpy array")
+        if transform_depth < 0:
+            raise ValueError("Transform depth must be non-negative")
+        if not isinstance(transform_depth, int):
+            raise TypeError("Transform depth must be an integer")
 
-        Parameters:
-            image (numpy.ndarray): The input image.
-            transform_depth (int): The depth of the discrete wavelet transform (DWT).
-            border_type (int): The padding type.
-            border_constant (int): The padded value
-
-        Returns:
-            numpy.ndarray: Image small copy obtained using DWT of the specified depth
-        """
         ratio = self._ONE_STEP_RATIO ** transform_depth
-
         low_left = get_padded_copy(image, ratio, border_type, border_constant).astype(np.float32)
 
-        for i in range(transform_depth):
+        for _ in range(transform_depth):
             evens, odds = low_left[::2, :, :], low_left[1::2, :, :]
             sums = evens + odds
             evens, odds = sums[:, ::2, :], sums[:, 1::2, :]
             low_left = (evens + odds) * 0.25
 
-        return low_left.astype(np.uint8)
+        return np.clip(low_left, 0, 255).astype(np.uint8)

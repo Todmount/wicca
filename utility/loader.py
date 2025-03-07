@@ -48,20 +48,10 @@ def get_padded_copy(image: np.ndarray, ratio: int, border_type: int = cv2.BORDER
 
     Returns:
         numpy.ndarray: Padded image
+
+    Raises:
+        ValueError: If inputs are invalid
     """
-    # rows, cols, channels = image.shape
-    #
-    # quotient, remainder = divmod(rows, ratio)
-    # rows_to_add = 0 if remainder == 0 else (quotient + 1) * ratio - rows
-    #
-    # quotient, remainder = divmod(cols, ratio)
-    # cols_to_add = 0 if remainder == 0 else (quotient + 1) * ratio - cols
-    #
-    # if rows_to_add == 0 and cols_to_add == 0:
-    #     return image
-    #
-    # return cv2.copyMakeBorder(image, 0, rows_to_add, 0, cols_to_add, border_type, None,
-    #                           [border_constant, border_constant, border_constant])
 
 
     if not isinstance(image, np.ndarray):

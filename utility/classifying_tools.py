@@ -5,7 +5,8 @@ import pandas as pd
 from typing import Optional
 
 from utility.data_loader import load_image
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON #, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
+from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON
+
 
 def get_prediction(image: np.ndarray, classifier: dict, top: int = 5) -> list:
   """
@@ -28,6 +29,7 @@ def get_prediction(image: np.ndarray, classifier: dict, top: int = 5) -> list:
   preds = model.predict(x)
   
   return decode_predictions(preds, top=top)
+
 
 def classify_images_n_icons_from_folder(classifier: dict, folder: str, coder, depth: int = 1,
                                         interpolation: int = cv2.INTER_AREA) -> dict:
@@ -62,6 +64,7 @@ def classify_images_n_icons_from_folder(classifier: dict, folder: str, coder, de
 
     return results
 
+
 def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
   """
   Extract specified items from predictions
@@ -83,39 +86,3 @@ def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
     items.append(pred[idx])
 
   return items
-
-# def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
-#   """
-#   Compare results of classifying source vs. icons
-#
-#   Parameters:
-#     results (dict): results of classifying
-#     top (int): top classes count
-#   Returns:
-#     Dataframe summarizing classifying results
-#   """
-#   file_names = []
-#   similar_classes = []
-#   similar_classes_percentage = []
-#   best_class_eq = []
-#
-#   for file, preds in results.items():
-#       file_names.append(file)
-#
-#       src_preds = preds[SOURCE][0]
-#       icn_preds = preds[ICON][0]
-#
-#       src_classes = extract_item_from_preds(src_preds, 1)
-#       icn_classes = extract_item_from_preds(icn_preds, 1)
-#
-#       src_probs = extract_item_from_preds(src_preds, 2)
-#       icn_probs = extract_item_from_preds(icn_preds, 2)
-#
-#       similar_classes_count = len(set(src_classes) & set(icn_classes))
-#
-#       similar_classes.append(similar_classes_count)
-#       similar_classes_percentage.append(float(similar_classes_count / top) * 100)
-#
-#       best_class_eq.append(int(src_classes[0] == icn_classes[0]))
-#
-#   return pd.DataFrame({FILE: file_names, SIM_CLASSES: similar_classes, SIM_CLASSES_PERC: similar_classes_percentage, SIM_BEST_CLASS: best_class_eq})

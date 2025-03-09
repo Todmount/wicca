@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from typing import Optional
 
-from utility.loader import load_image
+from utility.data_loader import load_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
 
 def get_prediction(image: np.ndarray, classifier: dict, top: int = 5) -> list:

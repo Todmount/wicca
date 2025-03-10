@@ -96,7 +96,7 @@ def load_summary_results(depth: int, classifier_name: str, describe: bool = Fals
             print("Shape:", summary_df.shape)
             print("Columns:", summary_df.columns.tolist())
             print("First few rows:")
-            print(summary_df.head())
+            summary_df.head()
         return summary_df
 
     except Exception as e:

@@ -4,7 +4,7 @@ import numpy as np
 from typing import Optional
 
 
-from utility.loader import get_padded_copy
+from utility.data_loader import get_padded_copy
 
 class WaveletCoder(ABC):
     """

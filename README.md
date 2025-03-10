@@ -1,8 +1,8 @@
-# WCLC: Framework for Wavelet Compressed Large-Image Classification
+# WICCA : Wavelet-based Image Compression & Classification Analysis.
 *A framework for exploring wavelet compression effects on image classification.*
 
 ## 📌 Overview
-WCLC (Wavelet Compressed Large-image Classification) is a research-driven framework that investigates how wavelet-based image compression affects classification performance. The primary focus is on reducing high-resolution images (>2000px) into compact representations while maintaining classification accuracy. Currently, the framework is centered on Haar wavelet compression.
+WICCA is a research-driven framework that investigates how wavelet-based image compression affects classification performance. The primary focus is on reducing high-resolution images (>2000px) into compact representations while maintaining classification accuracy. Currently, the framework is centered on Haar wavelet compression.
 
 ## 🎯 Project Goals
 ### 🌍 Global Goal
@@ -33,15 +33,20 @@ cd WCLC
 # Install dependencies
 pip install -r requirements.txt
 ```
+
 **or**   
 
 Download docker image (will be provided later)
 
 ## 🏗 Usage
-As for now please refer to the **demo.ipynb**
+As for now, please refer to the **demo.ipynb**
 
 ## 🔄 Roadmap
 - [x] Implement Haar wavelet compression
+- [x] Implement comparison functionality by various conversion depth and classifiers
+- [ ] Add a side-by-side visualization of the original image and its icon
+- [ ] Implement minimal Flask MVP
+- [ ] Dockerize the project
 - [ ] Extend to other wavelets (Daubechies, Coiflet, etc.)
 - [ ] Integrate deep learning-based classifiers
 - [ ] Optimize for large-scale datasets

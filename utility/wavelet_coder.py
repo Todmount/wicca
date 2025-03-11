@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
 import cv2
 import numpy as np
-from typing import Optional
-
 
 from utility.data_loader import get_padded_copy
+
 
 class WaveletCoder(ABC):
     """
@@ -14,7 +13,8 @@ class WaveletCoder(ABC):
     @abstractmethod
     def get_small_copy(self, image: np.ndarray, transform_depth: int,
                        border_type: int = cv2.BORDER_REPLICATE,
-                       border_constant: int = 0) -> np.ndarray:
+                       border_constant: int = 0
+                       ) -> np.ndarray:
         """
         Resize the image using wavelet transform.
         """
@@ -30,9 +30,12 @@ class HaarCoder(WaveletCoder):
         super().__init__()
         self._ONE_STEP_RATIO = 2
 
-    def get_small_copy(self, image: np.ndarray, transform_depth: int,
+    def get_small_copy(self, image: np.ndarray,
+                       transform_depth: int,
                        border_type: int = cv2.BORDER_REPLICATE,
-                       border_constant: int = 0) -> np.ndarray:
+                       border_constant: int = 0
+                       ) -> np.ndarray:
+
         if not isinstance(image, np.ndarray):
             raise ValueError("Image must be a numpy array")
         if transform_depth < 0:

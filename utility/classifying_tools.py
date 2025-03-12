@@ -3,14 +3,17 @@ import sys
 import cv2
 import logging
 import numpy as np
-from typing import Optional
+import matplotlib.pyplot as plt
+import concurrent.futures
+import contextlib
+from typing import Optional, Any, Dict, Tuple
 
 from utility.data_loader import load_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON
 
 
 def load_classifier(model_class,
-                    shape: tuple[int, int] = (224, 224),
+                    shape: Tuple[int, int] = (224, 224),
                     weights:str = 'imagenet'
                     ) -> Optional[dict]:
     """
@@ -127,3 +130,146 @@ def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
         items.append(pred[idx])
 
     return items
+
+
+class ClassifierProcessor:
+    """
+    A class to handle batch processing of multiple classifiers with the same parameters.
+    """
+
+    def __init__(self,
+                 path: str,
+                 coder: Any,
+                 depth: int,
+                 interpolation: int,
+                 results_folder: str,
+                 top: int,
+                 rsltmgr):
+        """
+        Initialize the classifier processor with all required dependencies.
+
+        Parameters:
+        -----------
+        path : str
+            Path to the folder containing images to classify
+        coder : object
+            Wavelet coder instance (like HaarCoder)
+        depth : int
+            The depth of transforming for wavelet compression
+        top : int
+            Number of top classes to use for comparison
+        interpolation : int
+            Type of interpolation used in resizing (e.g., cv2.INTER_AREA)
+        results_folder : str
+            Path to the folder where results will be saved
+        rsltmgr : module
+            Result manager module containing get_short_comparison function
+        """
+        self.path = path
+        self.coder = coder
+        self.depth = depth
+        self.top = top
+        self.interpolation = interpolation
+        self.results_folder = results_folder
+        self.rsltmgr = rsltmgr
+
+        # Ensure results directory exists
+        os.makedirs(self.results_folder, exist_ok=True)
+
+    def process_classifier(self, item: Tuple[str, Dict]) -> Tuple[str, Any]:
+        """
+        Process a single classifier.
+
+        Parameters:
+        -----------
+        item : tuple
+            A tuple containing (name, classifier)
+
+        Returns:
+        --------
+        tuple
+            A tuple of (name, summary_dataframe)
+        """
+        name, classifier = item
+        res = classify_images_n_icons_from_folder(
+            classifier, self.path, self.coder, self.depth, self.interpolation
+        )
+        # Using the rsltmgr module correctly as passed in the constructor
+        res_df = self.rsltmgr.get_short_comparison(res, self.top)
+
+        # Save CSV files inside the "results" folder
+        res_df.to_csv(os.path.join(self.results_folder, f"{name}-depth_{self.depth}.csv"))
+        sum_df = res_df.describe()
+        sum_df.to_csv(os.path.join(self.results_folder, f"{name}-summary-depth_{self.depth}.csv"))
+
+        return name, sum_df
+
+    def process_all_classifiers(self, classifiers: Dict[str, Dict], timeout: int = 3600) -> Dict[str, Any]:
+        """
+        Process multiple classifiers in parallel.
+
+        Parameters:
+        -----------
+        classifiers : dict
+            Dictionary of classifiers where keys are names and values are classifier instances
+        timeout : int, optional
+            Maximum execution time in seconds, defaults to 1 hour
+
+        Returns:
+        --------
+        dict
+            Dictionary with results where keys are classifier names and values are summary dataframes
+        """
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            try:
+                results = dict(executor.map(
+                    self.process_classifier,
+                    classifiers.items(),
+                    timeout=timeout
+                ))
+                return results
+            except concurrent.futures.TimeoutError:
+                print("Processing timed out")
+                return {}
+            except Exception as e:
+                print(f"An error occurred: {str(e)}")
+                return {}
+
+    def show_image_vs_icon(self, image: np.ndarray) -> None:
+        """
+        Displays an original image alongside its compressed version with specified
+        transformation depth. The method also prints the size of both images.
+
+        This function visualizes the effect of compression on an image by comparing
+        the original image with its compressed counterpart. The compression is
+        performed using the `get_small_copy` method of the `coder` object, with the
+        specified depth defined by `self.depth`. The sizes of both the original and
+        compressed images are printed for reference.
+
+        Args:
+            image (np.ndarray): The original image to be compared with its compressed version.
+            It must be a non-empty instance of `np.ndarray`.
+
+        Raises:
+            ValueError: If the provided image is None, has zero size, or is not an
+            instance of `np.ndarray`.
+        """
+
+        if image is None:
+            raise ValueError("Image did not load correctly. Please check the file path and try again.")
+
+        original = image
+        compressed = self.coder.get_small_copy(
+            image=original,
+            transform_depth=self.depth
+        )
+
+        # Display original vs. compressed
+        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+        axes[0].imshow(original), axes[0].set_title("Original Image")
+        axes[1].imshow(compressed), axes[1].set_title(f"Compressed Image, depth = {self.depth}")
+        plt.show()
+
+        # Print image statistics
+        print(f"Original size: {original.shape}")
+        print(f"Compressed size: {compressed.shape}")

@@ -5,7 +5,6 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import concurrent.futures
-import contextlib
 from typing import Optional, Any, Dict, Tuple
 
 from utility.data_loader import load_image
@@ -20,7 +19,6 @@ def load_classifier(model_class,
     Load a classifier model with error handling.
 
     Parameters:
-        name: Model name
         model_class: Model class to instantiate
         shape: Input shape tuple (height, width)
         weights: Pre-trained weights to use, defaults to 'imagenet'
@@ -71,8 +69,9 @@ def get_prediction(image: np.ndarray,
 
 def classify_images_n_icons_from_folder(classifier: dict,
                                         folder: str,
-                                        coder,
+                                        coder: Any,
                                         depth: int = 1,
+                                        top: int = 5,
                                         interpolation: int = cv2.INTER_AREA
                                         ) -> dict:
     """
@@ -103,7 +102,7 @@ def classify_images_n_icons_from_folder(classifier: dict,
         icon = coder.get_small_copy(image, depth)
         resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=interpolation)
 
-        icon_predictions = get_prediction(resized_icon, classifier)
+        icon_predictions = get_prediction(resized_icon, classifier, top)
 
         results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
 
@@ -176,7 +175,8 @@ class ClassifierProcessor:
         # Ensure results directory exists
         os.makedirs(self.results_folder, exist_ok=True)
 
-    def process_classifier(self, item: Tuple[str, Dict]) -> Tuple[str, Any]:
+    # def process_classifier(self, item) -> Tuple[str, Any]:
+    def process_classifier(self, item: Tuple[str, Dict], name: str = None) -> Tuple[str, Any]:
         """
         Process a single classifier.
 
@@ -190,12 +190,26 @@ class ClassifierProcessor:
         tuple
             A tuple of (name, summary_dataframe)
         """
-        name, classifier = item
+
+        # Handle both tuple input and direct classifier input
+        if isinstance(item, tuple) and len(item) == 2:
+            name, classifier = item
+        else:
+            if name is None:
+                # Try to get the name from the classifier object if possible
+                try:
+                    name = item.__class__.__name__
+                except AttributeError:
+                    name = "UnnamedClassifier"
+            classifier = item
+
         res = classify_images_n_icons_from_folder(
-            classifier, self.path, self.coder, self.depth, self.interpolation
+            classifier, self.path, self.coder, self.depth, self.top, self.interpolation
         )
+
         # Using the rsltmgr module correctly as passed in the constructor
         res_df = self.rsltmgr.get_short_comparison(res, self.top)
+        # res_df = res_df.style.format('{:.4f}')
 
         # Save CSV files inside the "results" folder
         res_df.to_csv(os.path.join(self.results_folder, f"{name}-depth_{self.depth}.csv"))

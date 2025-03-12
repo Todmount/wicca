@@ -136,34 +136,6 @@ def compare_summaries(classifier_names: List[str], depths: List[int], target_val
     return pd.DataFrame(data_list)
 
 
-# def visualize_comparison(comparison_data: pd.DataFrame, title=None, figsize=(12, 6)):
-#     """
-#     Visualizes the comparison of classification performance across depths and classifiers.
-#
-#     Args:
-#         comparison_data (pd.DataFrame): DataFrame with mean values for different classifiers and depths.
-#         title (str, optional): Title for the plot.
-#         figsize (tuple, optional): Figure size.
-#     """
-#     sns.set_style("whitegrid")
-#     fig, axes = plt.subplots(1, 3, figsize=figsize, sharex=True)
-#
-#     metrics = [SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS]
-#     titles = ["Similar Classes (Count)", "Similar Classes (%)", "Similar Best Class"]
-#
-#     for i, metric in enumerate(metrics):
-#         sns.lineplot(data=comparison_data, x="Depth", y=metric, hue="Classifier", marker="o", ax=axes[i])
-#         axes[i].set_title(titles[i])
-#         axes[i].set_ylabel(metric)
-#         axes[i].set_xlabel("Depth")
-#         axes[i].legend(title="Classifier")
-#
-#     if title:
-#         fig.suptitle(title)
-#
-#     plt.tight_layout()
-#     plt.show()
-
 def visualize_comparison(comparison_data: pd.DataFrame, metric: str, title: str = None, figsize=(12, 6)) -> None:
     """
     Visualizes the comparison of classification performance across depths and classifiers using a heatmap.
@@ -184,11 +156,8 @@ def visualize_comparison(comparison_data: pd.DataFrame, metric: str, title: str 
 
     if comparison_data.empty:
         raise ValueError("Comparison data cannot be empty")
-
     if metric not in comparison_data.columns:
         raise ValueError(f"Metric '{metric}' not found in comparison data columns")
-
-
     if not all(x > 0 for x in figsize):
         raise ValueError("Figure size dimensions must be positive")
 
@@ -213,6 +182,8 @@ def visualize_comparison(comparison_data: pd.DataFrame, metric: str, title: str 
 
     if title:
         plt.title(title)
+    else:
+        plt.title(f"{metric}")
 
     plt.tight_layout()
     plt.show()

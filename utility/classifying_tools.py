@@ -279,9 +279,15 @@ class ClassifierProcessor:
         )
 
         # Display original vs. compressed
-        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-        axes[0].imshow(original), axes[0].set_title("Original Image")
-        axes[1].imshow(compressed), axes[1].set_title(f"Compressed Image, depth = {self.depth}")
+        fig, ax = plt.subplots(1, 2, figsize=(12, 8))
+        ax[0].imshow(original)
+        ax[0].set_title(f"Source, shape = {original.shape}")
+        ax[0].axis('off')
+
+        ax[1].imshow(compressed)
+        ax[1].set_title(f"Icon, depth = {self.depth}, shape = {compressed.shape}")
+        ax[1].axis('off')
+
         plt.show()
 
         # Print image statistics

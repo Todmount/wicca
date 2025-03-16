@@ -1,20 +1,32 @@
 import os
 import sys
-import cv2
+import time
 import logging
-import numpy as np
-import matplotlib.pyplot as plt
 import concurrent.futures
-from typing import Optional, Any, Dict, Tuple, Union, List
+from typing import Any, Dict, Callable, List, Optional, Tuple, Union
+
+import cv2
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from utility.data_loader import load_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON
 
+# Logging message formatting
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
-def load_classifier(model_class,
-                    shape: Tuple[int, int] = (224, 224),
-                    weights: str = 'imagenet'
-                    ) -> Optional[dict]:
+# Type aliases
+ModelClass = Callable
+ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
+ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
+
+
+def load_single_model(model_class,
+                      shape: Tuple[int, int] = (224, 224),
+                      weights: str = 'imagenet'
+                      ) -> Optional[dict]:
     """
     Load a classifier model with error handling.
 
@@ -39,6 +51,36 @@ def load_classifier(model_class,
     except Exception as e:
         logging.error(f"Error loading: {str(e)}")
         return None
+
+
+def load_models(models: ModelsDict) -> Dict[str, Any]:
+    """
+    Load multiple image classification models with progress tracking.
+
+    Args:
+        models: Dictionary mapping model names to either:
+               - a model class, or
+               - a tuple of (model_class, config_dict)
+
+    Returns:
+        Dictionary mapping model names to loaded classifier instances
+    """
+    start = time.time()
+    classifiers_dict = {}
+
+    for name, model_info in tqdm(models.items(), desc="Loading classifiers"):
+        # Check if this is a tuple (model with config) or just a model class
+        if isinstance(model_info, tuple):
+            model_class, kwargs = model_info
+        else:
+            model_class = model_info
+            kwargs = {}
+
+        classifiers_dict[name] = load_single_model(model_class, **kwargs)
+
+    end = time.time()
+    print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
+    return classifiers_dict
 
 
 def get_prediction(image: np.ndarray,
@@ -67,13 +109,13 @@ def get_prediction(image: np.ndarray,
     return decode_predictions(preds, top=top)
 
 
-def classify_images_n_icons_from_folder(classifier: dict,
+def classify_images_n_icons_from_folder(classifier: Dict[str, Any],
                                         folder: str,
                                         coder: Any,
                                         depth: Tuple[int, ...],
                                         top: int = 5,
                                         interpolation: int = cv2.INTER_AREA
-                                        ) -> dict:
+                                        ) -> Dict[str, Any]:
     """
     Returns top predictions for the images and their icons.
 
@@ -135,18 +177,9 @@ class ClassifierProcessor:
     """
     Handles the processing of classifiers.
 
-    Including image classification, resizing, and
-    comparison tasks.
-
     Provides functionality to process single classifiers, multiple
     classifiers with parallel execution, and classifiers across multiple
     transformation depths. Also includes method for visualizing compression effects.
-
-    This class is designed to work with wavelet image compressors and classifiers to
-    facilitate tasks like image classification, compression, and result management. It
-    saves results to disk and supports working with multiple transformation depths to
-    analyze classifiers' performance. The class is also capable of visualizing the effect
-    of wavelet compression on images.
 
     Attributes:
         path (str): Path to the folder containing images for classification.
@@ -158,7 +191,6 @@ class ClassifierProcessor:
         top (int): Number of top classes to consider during classification.
         rsltmgr (module): Result manager module that provides methods like get_short_comparison.
     """
-
     def __init__(self,
                  path: str,
                  coder: Any,
@@ -182,6 +214,8 @@ class ClassifierProcessor:
         self.rsltmgr = rsltmgr
 
         # Normalizing different inputs for various depths
+        if self.depth is None:
+            raise ValueError("Depth must be provided")
         if isinstance(self.depth, int) and self.depth > 0:
             self.depth = (self.depth,)
         elif isinstance(self.depth, (tuple, list, range)):
@@ -189,7 +223,7 @@ class ClassifierProcessor:
         else:
             raise ValueError("Depth must be a positive integer, tuple, list, or range")
 
-    def _save_results(self, result, summary, name: str) -> None:
+    def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
         Saves result and summary data to CSV files in a folder specific to the current depth.
 
@@ -205,25 +239,31 @@ class ClassifierProcessor:
         """
         results_folder = os.path.join(self.results_folder, f"depth_{self.depth}")
         if not os.path.exists(results_folder):
-            print(f"Created folder {results_folder}")
+            print(f"ATTENTION. Created folder {results_folder}")
             os.makedirs(results_folder, exist_ok=True)
 
         result.to_csv(os.path.join(results_folder, f"{name}-depth_{self.depth}.csv"))
         summary.to_csv(os.path.join(results_folder, f"{name}-summary-depth_{self.depth}.csv"))
 
-    def _process_core(self, item):
-        """Core processing function for single classifier.
-
-        Is NOT meant to be called directly.
+    def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
         """
+        Processes a given item using the provided classifier and saves the resulting
+        data.
 
-        if self.depth is None:
-            raise ValueError("Depth must be provided")
-        # if self.depth <= 0:
-        #     raise ValueError("Depth must be positive")
+        The method performs classification of images and icons from a folder using the
+        given classifier. It then generates a summary of the classification results
+        and saves the results as CSV files. Finally, the method prints a message
+        indicating that the classifier processing is complete.
 
+        Args:
+            item: Tuple containing the name of the classifier and the classifier object.
+
+        Returns:
+            A tuple containing the name of the classifier and the summary dataframe
+            generated from the classification results.
+
+        """
         name, classifier = item
-
         res = classify_images_n_icons_from_folder(
             classifier, self.path, self.coder, self.depth, self.top, self.interpolation
         )
@@ -238,50 +278,29 @@ class ClassifierProcessor:
         print(f"Classifier {name} processed")
         return name, sum_df
 
-    # def _process_classifier_for_batch(self, item) -> Tuple[str, Any]:
-    #     """
-    #     Process a single classifier.
-    #
-    #     Parameters:
-    #     -----------
-    #     item : tuple
-    #         A tuple containing (name, classifier)
-    #
-    #     Returns:
-    #     --------
-    #     tuple
-    #         A tuple of (name, summary_dataframe)
-    #     """
-    #
-    #     name, classifier = item
-    #     return self._process_core(classifier, name)
-
-    # def process_classifier(self, item, name: str) -> Tuple[str, Any]:
-    #     """Process a single classifier."""
-    #
-    #     if name is None:
-    #         raise ValueError("Name must be provided")
-    #     if not isinstance(self.depth, int):
-    #         raise ValueError("This function is meant for singular depth.\n"
-    #                          "Maybe you meant to use process_all_classifiers_by_depths?")
-    #
-    #     return self._process_core(item, name)
-
-    def _parallel_proc(self, classifiers, timeout: int = 3600) -> Dict[str, Any]:
+    def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
         """
-        Process multiple classifiers in parallel.
+        Processes multiple classifiers using parallel threads.
 
-        Parameters:
-        -----------
-        classifiers : dict
-            Dictionary of classifiers where keys are names and values are classifier instances
-        timeout : int, optional
-            Maximum execution time in seconds, defaults to 1 hour
+        This method runs the classifier tasks in parallel threads using
+        concurrent.futures.ThreadPoolExecutor. It supports a timeout
+        parameter for handling cases where the execution exceeds the
+        allowed time limit. Captures and handles exceptions such as
+        TimeoutError and ValueError if encountered during execution.
+
+        Args:
+            classifiers (Dict[str, Any]): A dictionary where keys
+                represent classifier names and values represent the
+                corresponding data or objects to process.
+            timeout (int, optional): The maximum time, in seconds, to
+                allow for processing. Defaults to None, meaning no
+                timeout is applied.
 
         Returns:
-        --------
-        dict
-            Dictionary with results where keys are classifier names and values are summary dataframes
+            Dict[str, Any]: A dictionary of processed results where
+                keys match the classifier names and values match the
+                output from `_process_core`. Returns an empty dictionary
+                in case of exceptions such as TimeoutError or ValueError.
         """
         with concurrent.futures.ThreadPoolExecutor() as executor:
             try:
@@ -294,35 +313,121 @@ class ClassifierProcessor:
             except concurrent.futures.TimeoutError:
                 print("Processing timed out")
                 return {}
-            except Exception as e:
+            except ValueError as e:
                 print(f"An error occurred: {str(e)}")
+                # raise
                 return {}
 
+    def _single_classifier(self, name: str,
+                           classifier_dict: Dict[str, Any],
+                           timeout: int = None
+                           ) -> None:
+        """
+        Processes a single classifier by validating inputs, wrapping the classifier
+        in a dictionary, and delegating processing to another method. This method
+        ensures that the provided input meets the required structure and logs
+        a warning when appropriate configurations are absent.
+
+        Args:
+            name (str): The name of the classifier. Must be provided.
+            classifier_dict (dict): Dictionary representing the classifier. It must
+                contain the key required by the system for identification (e.g., 'MODEL').
+            timeout (int, optional): The timeout value for processing the classifier in
+                seconds. If not provided, a warning is logged suggesting a default
+                value of 3600 seconds (1 hour) or more.
+
+        Returns:
+            dict: The result of processing the single classifier, generated by
+            the `process_classifiers` method.
+
+        Raises:
+            ValueError: If the 'name' argument is not provided.
+            ValueError: If 'classifier_dict' is not of type dict or does not contain
+            the required 'MODEL' key.
+        """
+
+        # Validate inputs
+        if not name:
+            raise ValueError("Name must be provided for single classifier")
+        if not isinstance(classifier_dict, dict) or MODEL not in classifier_dict:
+            raise ValueError(f"Classifier must be a dictionary containing a '{MODEL}' key")
+        if timeout is None:
+            logging.warning("Timeout for processing is not set. "
+                            "It is recommended to set it to 3600 seconds (1 hour) or more.")
+
+        # Wrap and process the classifier
+        wrapped_classifier = {name: classifier_dict}
+        return self.process_classifiers(wrapped_classifier, timeout)
+
+    def process_single_classifier(self, *args, **kwargs):
+        """
+        Safely process a classifier with helpful error messages for common mistakes.
+
+        This is a helper wrapper around process_single_classifier that catches and
+        explains common errors.
+
+        Returns:
+        --------
+        The result from process_single_classifier or None if an error occurs
+        """
+        try:
+            return self._single_classifier(*args, **kwargs)
+        except TypeError as e:
+            if "missing 1 required positional argument: 'classifier_dict'" in str(e):
+                logging.error("You need to provide both the name and the classifier dictionary.\n"
+                              "Correct usage: process_single_classifier(name, classifier_dict)\n"
+                              "Example: process_single_classifier('VGG19', classifiers['VGG19'])\n")
+                return None
+            else:
+                raise
+
     def process_classifiers(self,
-                            classifiers,
-                            name: str = None,
-                            timeout: int = 3600
+                            classifiers: Dict[str, Any],
+                            timeout: int = None
                             ):
+        """
+        Processes multiple classifiers in parallel with optional timeout and depth management.
+
+        This function takes a dictionary of classifiers and processes them in parallel based on
+        the depth configurations defined in the instance. It also includes an optional timeout
+        parameter. If a single classifier is detected, an exception is raised with guidance on
+        redirecting to a dedicated single classifier processing function. Additional handling is
+        included for debugging or ensuring proper timeout configurations.
+
+        Args:
+            classifiers (Dict[str, Any]): A dictionary of classifiers to be processed.
+                Each key-value pair represents a classifier and its associated data.
+            timeout (int, optional): Time in seconds before the processing of classifiers
+                should timeout. If not provided, no timeout is enforced.
+
+        Raises:
+            Exception: Raised if a single classifier is detected instead of multiple,
+                prompting the user to use an appropriate method. Additionally, if
+                `timeout` is set to 1984, an exception is raised as an intentional
+                debugging or thematic mechanism.
+        """
 
         # Handle a single classifier
-        if not isinstance(classifiers, dict):
-            if name is None:
-                # Try to infer name or raise error if we can't
-                if hasattr(classifiers, '__name__'):
-                    name = classifiers.__name__
-                elif hasattr(classifiers, '__class__'):
-                    name = classifiers.__class__.__name__
-                else:
-                    raise ValueError("When providing a single classifier, the 'name' parameter must be specified")
+        if MODEL in classifiers:
+            raise Exception("\nIt appears you are trying to process a single classifier.\n"
+                             "Use process_single_classifier instead.")
 
-            # Convert single classifier to a dict with one entry
-            classifiers = {name: classifiers}
+        # My way to understand where the bug is
+        # If I forget to delete, consider it an eastern egg
+        if timeout == 1984:
+            raise Exception("It's your lucky day! Big Brother is not watching")
 
+        start_time = time.time()
         for depth in self.depth:
             self.depth = depth
-            print(f"Processing at depth {depth}")
-            self._parallel_proc(classifiers, timeout)
-            print(f"Depth {depth} processed\n")if self.depth > 0 else print("Skipped incorrect depth")
+            if isinstance(self.depth, int) and self.depth > 0:
+                print(f"Processing at depth {depth}")
+                self._parallel_proc(classifiers, timeout)
+                print(f"Depth {depth} processed\n")
+            else:
+                print(f"Depth '{depth}' not valid. Skipping...\n")
+        end_time = time.time()
+        print(f"Total processing time is {end_time - start_time:.2f} seconds")
 
     def show_image_vs_icon(self, image: np.ndarray) -> None:
         """

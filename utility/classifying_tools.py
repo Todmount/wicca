@@ -3,6 +3,7 @@ import sys
 import time
 import logging
 import concurrent.futures
+from pathlib import Path
 from typing import Any, Dict, Callable, List, Optional, Tuple, Union
 
 import cv2
@@ -10,9 +11,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from functools import wraps
 
 from utility.data_loader import load_image
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON
+from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER
 
 # Logging message formatting
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -53,7 +55,7 @@ def load_single_model(model_class,
         return None
 
 
-def load_models(models: ModelsDict) -> Dict[str, Any]:
+def load_models(models: Dict[str, int]) -> Dict[str, Any]:
     """
     Load multiple image classification models with progress tracking.
 
@@ -173,6 +175,61 @@ def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
     return items
 
 
+def normalize_depth(depth):
+    """
+    Normalizes the given depth input.
+
+    The function ensures the provided `depth` is converted into a uniform tuple of
+    integers, ensuring compatibility and usability in further operations. It raises
+    errors if the input does not conform to the expected types and conditions.
+
+    Args:
+        depth: The depth input to be normalized. It can be an integer greater than
+            0, a tuple, a list, or a range. A `None` value and invalid types will
+            raise respective errors.
+
+    Returns:
+        A tuple of integers representing the normalized depth.
+
+    Raises:
+        ValueError: If depth is not provided (None).
+        ValueError: If depth is not a positive integer, tuple, list, or range.
+        ValueError: If any element in the depth is not an integer.
+    """
+    if depth is None:
+        raise ValueError("Depth must be provided")
+    if isinstance(depth, int) and depth > 0:
+        depth = (depth,)
+    if isinstance(depth, (tuple, list, range)):
+        depth = tuple(depth)
+    else:
+        raise ValueError("Depth must be a positive integer, tuple, list, or range")
+    if all(isinstance(x, int) for x in depth):
+        return depth
+    else:
+        raise ValueError("All depths must be integers")
+
+
+def preserve_depth(func):
+    """Decorator that preserves the original depth value.
+    Saves depth at the start of function and restores it at the end,
+    regardless of any changes made within the function."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # Save original depth
+        original_depth = self.depth
+
+        # Execute the function (which may modify depth internally)
+        result = func(self, *args, **kwargs)
+
+        # Restore original depth
+        self.depth = original_depth
+        return result
+
+    return wrapper
+
+
 class ClassifierProcessor:
     """
     Handles the processing of classifiers.
@@ -196,14 +253,15 @@ class ClassifierProcessor:
                  coder: Any,
                  depth: Union[int, Tuple[int, ...], List[int], range],
                  interpolation: int,
-                 results_folder: str,
                  top: int,
-                 rsltmgr):
+                 rsltmgr,
+                 results_folder = RESULTS_FOLDER):
         """
         Initializes the object with provided attributes and normalizes various inputs
         for depth. Ensures depth is consistently treated as a tuple for subsequent
-        operations. Raises a ValueError if the depth parameter is not of an expected
-        type.
+        operations. Defaults results folder if not provided or not a Path object.
+        Raises:
+            ValueError if the depth parameter is not of an expected type.
         """
         self.path = path
         self.coder = coder
@@ -214,14 +272,13 @@ class ClassifierProcessor:
         self.rsltmgr = rsltmgr
 
         # Normalizing different inputs for various depths
-        if self.depth is None:
-            raise ValueError("Depth must be provided")
-        if isinstance(self.depth, int) and self.depth > 0:
-            self.depth = (self.depth,)
-        elif isinstance(self.depth, (tuple, list, range)):
-            self.depth = tuple(self.depth)
-        else:
-            raise ValueError("Depth must be a positive integer, tuple, list, or range")
+        self.depth = normalize_depth(self.depth)
+
+        # Validating and defaulting wrong results path
+        if not isinstance(self.results_folder, Path):
+            logging.warning("Results folder provided is not a Path object. \n"
+                            "Using default folder {project_root}/results")
+            self.results_folder = RESULTS_FOLDER
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
@@ -237,13 +294,12 @@ class ClassifierProcessor:
             summary: DataFrame containing the summary data to be saved.
             name: Base name of the files to be saved, to which depth and type will be appended.
         """
-        results_folder = os.path.join(self.results_folder, f"depth_{self.depth}")
-        if not os.path.exists(results_folder):
-            print(f"ATTENTION. Created folder {results_folder}")
-            os.makedirs(results_folder, exist_ok=True)
-
-        result.to_csv(os.path.join(results_folder, f"{name}-depth_{self.depth}.csv"))
-        summary.to_csv(os.path.join(results_folder, f"{name}-summary-depth_{self.depth}.csv"))
+        results_folder = self.results_folder / f"depth-{self.depth}"
+        if not results_folder.exists():
+            logging.info(f"Created folder {results_folder}")
+            results_folder.mkdir(parents=True, exist_ok=True)
+        result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
+        summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
     def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
         """
@@ -275,7 +331,7 @@ class ClassifierProcessor:
         # Save CSV files inside the "results" folder
         self._save_results(res_df, sum_df, name)
 
-        print(f"Classifier {name} processed")
+        # print(f"Classifier {name} processed") # Shut down temporarily
         return name, sum_df
 
     def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
@@ -311,8 +367,8 @@ class ClassifierProcessor:
                 ))
                 return results
             except concurrent.futures.TimeoutError:
-                print("Processing timed out")
-                return {}
+                print("Timeout occurred. Processing aborted.")
+                # return {}
             except ValueError as e:
                 print(f"An error occurred: {str(e)}")
                 # raise
@@ -323,27 +379,23 @@ class ClassifierProcessor:
                            timeout: int = None
                            ) -> None:
         """
-        Processes a single classifier by validating inputs, wrapping the classifier
-        in a dictionary, and delegating processing to another method. This method
-        ensures that the provided input meets the required structure and logs
-        a warning when appropriate configurations are absent.
+        Helper function to process a single classifier by wrapping it and validating input parameters.
+
+        This function validates the provided classifier and name, wraps the classifier
+        into a dictionary format, and delegates the processing to another method with
+        a given timeout.
 
         Args:
-            name (str): The name of the classifier. Must be provided.
-            classifier_dict (dict): Dictionary representing the classifier. It must
-                contain the key required by the system for identification (e.g., 'MODEL').
-            timeout (int, optional): The timeout value for processing the classifier in
-                seconds. If not provided, a warning is logged suggesting a default
-                value of 3600 seconds (1 hour) or more.
-
-        Returns:
-            dict: The result of processing the single classifier, generated by
-            the `process_classifiers` method.
+            name: Name of the classifier to be processed.
+            classifier_dict: A dictionary containing classifier details. Must include
+                a 'MODEL' key to specify the classifier model.
+            timeout: Timeout in seconds for processing. Defaults to None. Recommended
+                to be set to 3600 seconds (1 hour) or more.
 
         Raises:
-            ValueError: If the 'name' argument is not provided.
-            ValueError: If 'classifier_dict' is not of type dict or does not contain
-            the required 'MODEL' key.
+            ValueError: If the name is not provided.
+            ValueError: If the classifier_dict is not a dictionary or does not contain
+                the 'MODEL' key.
         """
 
         # Validate inputs
@@ -381,30 +433,26 @@ class ClassifierProcessor:
             else:
                 raise
 
+    @preserve_depth
     def process_classifiers(self,
                             classifiers: Dict[str, Any],
                             timeout: int = None
                             ):
         """
-        Processes multiple classifiers in parallel with optional timeout and depth management.
+        Processes classifiers across specified depths with optional timeout.
 
-        This function takes a dictionary of classifiers and processes them in parallel based on
-        the depth configurations defined in the instance. It also includes an optional timeout
-        parameter. If a single classifier is detected, an exception is raised with guidance on
-        redirecting to a dedicated single classifier processing function. Additional handling is
-        included for debugging or ensuring proper timeout configurations.
+        This method iterates over configured depths to process classifiers. It provides
+        parallel processing capabilities and logs comprehensive time statistics, including
+        dynamic formatting of the elapsed time. Certain constraints, like a specific timeout
+        value of 1984, trigger a customized exception.
 
         Args:
-            classifiers (Dict[str, Any]): A dictionary of classifiers to be processed.
-                Each key-value pair represents a classifier and its associated data.
-            timeout (int, optional): Time in seconds before the processing of classifiers
-                should timeout. If not provided, no timeout is enforced.
+            classifiers (Dict[str, Any]): A dictionary of classifiers to be processed. The key
+                is the classifier name, and the value is its configuration or data.
+            timeout (int, optional): Specifies the timeout value for processing classifiers.
 
         Raises:
-            Exception: Raised if a single classifier is detected instead of multiple,
-                prompting the user to use an appropriate method. Additionally, if
-                `timeout` is set to 1984, an exception is raised as an intentional
-                debugging or thematic mechanism.
+            Exception: If attempting to process a single classifier by mistake .
         """
 
         # Handle a single classifier
@@ -412,10 +460,11 @@ class ClassifierProcessor:
             raise Exception("\nIt appears you are trying to process a single classifier.\n"
                              "Use process_single_classifier instead.")
 
-        # My way to understand where the bug is
+        # Debugging
         # If I forget to delete, consider it an eastern egg
         if timeout == 1984:
-            raise Exception("It's your lucky day! Big Brother is not watching")
+            raise Exception("Big Brother is watching you...\n"
+                            "If you want to proceed try another timeout\n")
 
         start_time = time.time()
         for depth in self.depth:
@@ -426,9 +475,29 @@ class ClassifierProcessor:
                 print(f"Depth {depth} processed\n")
             else:
                 print(f"Depth '{depth}' not valid. Skipping...\n")
-        end_time = time.time()
-        print(f"Total processing time is {end_time - start_time:.2f} seconds")
 
+        end_time = time.time()
+        total_seconds = int(end_time - start_time)
+        logging.info(f"Total processing time: {total_seconds} seconds")
+
+        # Convert to hours, minutes, seconds
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+
+        # Build dynamic time string
+        time_parts = []
+        if hours > 0:
+            time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+        if minutes > 0 or (hours > 0 and seconds > 0):  # Show minutes if hours and seconds exist
+            time_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+        if seconds > 0 or not time_parts:  # Always show seconds if there are no other units
+            time_parts.append(f"{seconds} second{'s' if seconds > 1 else ''}")
+
+        time_str = " ".join(time_parts)
+        print(f"Total processing time: {time_str}")
+
+    @preserve_depth
     def show_image_vs_icon(self, image: np.ndarray) -> None:
         """
         Displays an original image alongside its compressed version with specified
@@ -453,23 +522,41 @@ class ClassifierProcessor:
             raise ValueError("Image did not load correctly. Please check the file path and try again.")
 
         original = image
-        compressed = self.coder.get_small_copy(
-            image=original,
-            transform_depth=self.depth
-        )
 
-        # Display original vs. compressed
-        fig, ax = plt.subplots(1, 2, figsize=(12, 8))
+        # Calculate the number of subplots needed (original + one for each depth)
+        n_depths = len(self.depth)
+        total_plots = n_depths + 1
+
+        # Calculate grid
+        ncols = int(min(3, total_plots))
+        nrows = int(np.ceil(total_plots / ncols))
+
+        fig, ax = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
+
+        # Flatten axes array if multidimensional
+        if total_plots > 1:
+            ax = ax.flatten()
+        else: ax = tuple(ax) # making it iterable
+
+        # Original image going first
         ax[0].imshow(original)
         ax[0].set_title(f"Source, shape = {original.shape}")
         ax[0].axis('off')
 
-        ax[1].imshow(compressed)
-        ax[1].set_title(f"Icon, depth = {self.depth}, shape = {compressed.shape}")
-        ax[1].axis('off')
+        for i, depth in enumerate(self.depth, start=1):
+            self.depth = depth
+            compressed = self.coder.get_small_copy(
+                image=original,
+                transform_depth=self.depth)
 
+            ax[i].imshow(compressed)
+            ax[i].set_title(f"Icon, depth = {depth}, shape = {compressed.shape}")
+            ax[i].axis('off')
+
+        # Turn off unused subplots
+        for i in range(total_plots, len(ax)):
+            ax[i].axis('off')
+            ax[i].set_visible(False)
+
+        plt.tight_layout()
         plt.show()
-
-        # Print image statistics
-        # print(f"Original size: {original.shape}")
-        # print(f"Compressed size: {compressed.shape}")

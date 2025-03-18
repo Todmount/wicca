@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+
 import cv2
 import numpy as np
 
@@ -11,10 +12,10 @@ def validate_image(image: np.ndarray, transform_depth: int) -> None:
     """
     if not isinstance(image, np.ndarray):
         raise ValueError(f"Error loading {image}. Image must be a numpy array")
-    if transform_depth < 0:
-        raise ValueError("Transform depth must be non-negative")
-    if not isinstance(transform_depth, int):
-        raise TypeError("Transform depth must be an integer")
+    # if transform_depth < 0:
+    #     raise ValueError("Transform depth must be non-negative")
+    # if not isinstance(transform_depth, int):
+    #     raise TypeError("Transform depth must be an integer")
 
 
 class WaveletCoder(ABC):
@@ -30,7 +31,7 @@ class WaveletCoder(ABC):
         """
         Resize the image using wavelet transform.
         """
-        pass
+        # pass
 
 
 class HaarCoder(WaveletCoder):

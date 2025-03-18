@@ -5,16 +5,21 @@ from typing import Optional
 
 def load_image(file_path: str) -> Optional[np.ndarray]:
     """
-    Load an image from the specified file path using OpenCV.
+    Loads an image from a file path and converts it to RGB format if it is a color image.
 
-    Parameters:
-        file_path (str): The path to the image file.
+    Reads an image file and attempts to convert it to RGB format when it is in color.
+    Returns the loaded image or None in case of failure. Raises a ValueError if the provided
+    file path is empty.
+
+    Args:
+        file_path (str): Path to the image file to be loaded.
 
     Returns:
-        Optional[numpy.ndarray]: The loaded image in RGB format, or None if loading fails.
+        Optional[np.ndarray]: The loaded image as a NumPy array, or None if the image could not
+        be loaded.
 
     Raises:
-        ValueError: If file_path is empty or None
+        ValueError: If the file path is empty.
     """
     if not file_path:
         raise ValueError("File path cannot be empty")
@@ -38,19 +43,27 @@ def load_image(file_path: str) -> Optional[np.ndarray]:
 def get_padded_copy(image: np.ndarray, ratio: int, border_type: int = cv2.BORDER_REPLICATE,
                     border_constant: int = 0) -> np.ndarray:
     """
-    Returns a padded copy of the image with height & width that are multiples of ratio
+    Pads an image to make its dimensions divisible by a specified ratio. The function
+    handles 2D (grayscale) and 3D (color) input images and allows different border
+    types and constant values for padding.
 
-    Parameters:
-        image (numpy.ndarray): The input image.
-        ratio (int): The input ratio.
-        border_type (int): The padding type.
-        border_constant (int): Fill value.
+    Args:
+        image (np.ndarray): Input image as a 2D or 3D numpy array.
+        ratio (int): Positive integer defining the divisibility constraint for the
+            image dimensions.
+        border_type (int, optional): Type of border for padding, as defined by
+            OpenCV constants. Defaults to `cv2.BORDER_REPLICATE`.
+        border_constant (int, optional): Constant pixel value for padding if
+            `border_type` is `cv2.BORDER_CONSTANT`. Defaults to 0.
 
     Returns:
-        numpy.ndarray: Padded image
+        np.ndarray: The padded image where dimensions are divisible by the given
+        ratio.
 
     Raises:
-        ValueError: If inputs are invalid
+        ValueError: If `image` is not a numpy array.
+        ValueError: If `ratio` is not a positive integer.
+        ValueError: If `image` does not have 2D or 3D dimensions.
     """
 
 

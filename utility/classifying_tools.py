@@ -23,6 +23,7 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 ModelClass = Callable
 ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
 ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
+Depth = Union[int, Tuple[int, ...], List[int], range]
 
 
 def load_single_model(model_class,
@@ -114,7 +115,7 @@ def get_prediction(image: np.ndarray,
 def classify_images_n_icons_from_folder(classifier: Dict[str, Any],
                                         folder: str,
                                         coder: Any,
-                                        depth: Tuple[int, ...],
+                                        depth: Depth,
                                         top: int = 5,
                                         interpolation: int = cv2.INTER_AREA
                                         ) -> Dict[str, Any]:
@@ -175,7 +176,7 @@ def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
     return items
 
 
-def normalize_depth(depth):
+def normalize_depth(depth: Depth):
     """
     Normalizes the given depth input.
 
@@ -248,14 +249,15 @@ class ClassifierProcessor:
         top (int): Number of top classes to consider during classification.
         rsltmgr (module): Result manager module that provides methods like get_short_comparison.
     """
+
     def __init__(self,
-                 path: str,
+                 path: Union[str, Path],
                  coder: Any,
-                 depth: Union[int, Tuple[int, ...], List[int], range],
+                 depth: Depth,
                  interpolation: int,
                  top: int,
                  rsltmgr,
-                 results_folder = RESULTS_FOLDER):
+                 results_folder=RESULTS_FOLDER):
         """
         Initializes the object with provided attributes and normalizes various inputs
         for depth. Ensures depth is consistently treated as a tuple for subsequent
@@ -331,9 +333,12 @@ class ClassifierProcessor:
         # Save CSV files inside the "results" folder
         self._save_results(res_df, sum_df, name)
 
-        # print(f"Classifier {name} processed") # Shut down temporarily
+        print(f"Classifier {name} processed")  # Shut down temporarily
         return name, sum_df
 
+    # import tensorflow as tf
+    # @tf.function(experimental_relax_shapes=True)
+    # @tf.autograph.experimental.do_not_convert
     def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
         """
         Processes multiple classifiers using parallel threads.
@@ -377,7 +382,7 @@ class ClassifierProcessor:
     def _single_classifier(self, name: str,
                            classifier_dict: Dict[str, Any],
                            timeout: int = None
-                           ) -> None:
+                           ):
         """
         Helper function to process a single classifier by wrapping it and validating input parameters.
 
@@ -403,9 +408,11 @@ class ClassifierProcessor:
             raise ValueError("Name must be provided for single classifier")
         if not isinstance(classifier_dict, dict) or MODEL not in classifier_dict:
             raise ValueError(f"Classifier must be a dictionary containing a '{MODEL}' key")
-        if timeout is None:
-            logging.warning("Timeout for processing is not set. "
-                            "It is recommended to set it to 3600 seconds (1 hour) or more.")
+        if timeout is None or not isinstance(timeout, int) or timeout < 0:
+            logging.warning("Timeout for processing is not set or invalid. It's value should be a positive integer.\n"
+                            "It is recommended to set it to 3600 seconds (1 hour) or more.\n"
+                            "Defaulting to None.")
+            timeout = None
 
         # Wrap and process the classifier
         wrapped_classifier = {name: classifier_dict}
@@ -443,8 +450,7 @@ class ClassifierProcessor:
 
         This method iterates over configured depths to process classifiers. It provides
         parallel processing capabilities and logs comprehensive time statistics, including
-        dynamic formatting of the elapsed time. Certain constraints, like a specific timeout
-        value of 1984, trigger a customized exception.
+        dynamic formatting of the elapsed time.
 
         Args:
             classifiers (Dict[str, Any]): A dictionary of classifiers to be processed. The key
@@ -458,7 +464,7 @@ class ClassifierProcessor:
         # Handle a single classifier
         if MODEL in classifiers:
             raise Exception("\nIt appears you are trying to process a single classifier.\n"
-                             "Use process_single_classifier instead.")
+                            "Use process_single_classifier instead.")
 
         # Debugging
         # If I forget to delete, consider it an eastern egg
@@ -466,12 +472,15 @@ class ClassifierProcessor:
             raise Exception("Big Brother is watching you...\n"
                             "If you want to proceed try another timeout\n")
 
+        results = {}
+
         start_time = time.time()
         for depth in self.depth:
             self.depth = depth
             if isinstance(self.depth, int) and self.depth > 0:
                 print(f"Processing at depth {depth}")
-                self._parallel_proc(classifiers, timeout)
+                depth_res = self._parallel_proc(classifiers, timeout)
+                results.update(depth_res)
                 print(f"Depth {depth} processed\n")
             else:
                 print(f"Depth '{depth}' not valid. Skipping...\n")
@@ -496,58 +505,71 @@ class ClassifierProcessor:
 
         time_str = " ".join(time_parts)
         print(f"Total processing time: {time_str}")
+        # You can uncomment this in case you want to see resulting dict for debugging
+        # Be aware, that output will become cumbersome
+        # return results
 
-    @preserve_depth
-    def show_image_vs_icon(self, image: np.ndarray) -> None:
+    def show_image_vs_icon(self, image: np.ndarray,
+                           depth_value: Depth,
+                           figsize: Tuple[int, int] = None
+                           ) -> None:
         """
-        Displays an original image alongside its compressed version with specified
-        transformation depth. The method also prints the size of both images.
-
-        This function visualizes the effect of compression on an image by comparing
-        the original image with its compressed counterpart. The compression is
-        performed using the `get_small_copy` method of the `coder` object, with the
-        specified depth defined by `self.depth`. The sizes of both the original and
-        compressed images are printed for reference.
+        Displays a series of images showcasing the original image alongside its transformed
+        icons at different depth levels. The method dynamically calculates the grid
+        structures required for plotting these images and presents them in a single figure.
 
         Args:
-            image (np.ndarray): The original image to be compared with its compressed version.
-            It must be a non-empty instance of `np.ndarray`.
+            image (np.ndarray): The original image to be used for generating transformed
+                icons.
+            depth_value (Depth): A depth parameter or iterable determining the levels
+                of transformation for the icons.
+            figsize (Tuple[int, int], optional): Dimensions (width, height) of the
+                figure in inches. Defaults to an automatically calculated size if not provided.
 
         Raises:
-            ValueError: If the provided image is None, has zero size, or is not an
-            instance of `np.ndarray`.
+            ValueError: If the `image` parameter is None.
+
         """
-
+        # Validation
         if image is None:
-            raise ValueError("Image did not load correctly. Please check the file path and try again.")
+            raise ValueError("Image didn't found. Please check your input.")
+        depth_value = normalize_depth(depth_value)
 
-        original = image
+        original = image  # new var for better readability
 
         # Calculate the number of subplots needed (original + one for each depth)
-        n_depths = len(self.depth)
+        n_depths = len(depth_value)
         total_plots = n_depths + 1
 
         # Calculate grid
         ncols = int(min(3, total_plots))
         nrows = int(np.ceil(total_plots / ncols))
 
-        fig, ax = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
+        if figsize:
+            fig, ax = plt.subplots(nrows, ncols, figsize=figsize)
+        else:
+            logging.warning(f'No figsize provided. Using calculated figsize: {(4 * ncols, 4 * nrows)}')
+            fig, ax = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
+
+        # fig, ax = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
 
         # Flatten axes array if multidimensional
         if total_plots > 1:
             ax = ax.flatten()
-        else: ax = tuple(ax) # making it iterable
+        else:
+            ax = tuple(ax)  # making it iterable
 
         # Original image going first
         ax[0].imshow(original)
         ax[0].set_title(f"Source, shape = {original.shape}")
         ax[0].axis('off')
 
-        for i, depth in enumerate(self.depth, start=1):
-            self.depth = depth
+        for i, depth in enumerate(depth_value, start=1):
+            depth_value = depth
             compressed = self.coder.get_small_copy(
                 image=original,
-                transform_depth=self.depth)
+                transform_depth=depth_value
+            )
 
             ax[i].imshow(compressed)
             ax[i].set_title(f"Icon, depth = {depth}, shape = {compressed.shape}")
@@ -558,5 +580,50 @@ class ClassifierProcessor:
             ax[i].axis('off')
             ax[i].set_visible(False)
 
+        plt.tight_layout()
+        plt.show()
+
+    def dwt_visualization(self, image: np.ndarray,
+                          depth_value: Depth,
+                          border_width: int = 1,
+                          border_color: tuple = (255, 255, 255),
+                          figsize: Tuple[int, int] = None
+                          ) -> None:
+        # Validation
+        if image is None:
+            raise ValueError("Image didn't found. Please check your input.")
+        depth_value = normalize_depth(depth_value)
+
+        original = image.copy()  # new var for better readability
+
+        for i, depth in enumerate(depth_value, start=1):
+            depth_value = depth
+            # Getting small copy (icon)
+            icon = self.coder.get_small_copy(
+                image=original,
+                transform_depth=depth_value
+            )
+            # Get icon dimension
+            icon_height, icon_width = icon.shape[:2]
+
+            # Draw border if provided
+            if border_width > 0:
+                if len(original.shape) == 3:
+                    original[0:icon_height + 2 * border_width, 0:icon_width + 2 * border_width] = border_color
+                else:
+                    original[0:icon_height + 2 * border_width, 0:icon_width + 2 * border_width, 0] = border_color[0]
+
+            original[border_width:icon_height + border_width,
+            border_width:icon_width + border_width] = icon
+
+        # Display the result
+        if figsize:
+            plt.figure(figsize=figsize)
+        else:
+            plt.figure(figsize=(10, 10))
+
+        plt.imshow(original)
+        plt.title(f"Original image with icon in top-left corner")
+        plt.axis('off')
         plt.tight_layout()
         plt.show()

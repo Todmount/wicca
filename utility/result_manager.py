@@ -7,7 +7,6 @@ from typing import List, Optional, Union, Tuple
 import pandas as pd
 
 from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
-from utility.classifying_tools import extract_item_from_preds
 from utility.classifying_tools import normalize_depth
 
 # Type aliases
@@ -19,6 +18,27 @@ class ResultPaths:
     regular: Path
     summary: Path
 
+
+def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
+    """
+    Extract specified items from predictions
+
+    Parameters:
+    preds (list): list of predictions
+    idx (int): index of the item in predictions
+
+    Returns:
+    Array of extracted items
+    """
+
+    if idx > 2:
+        return None
+
+    items = []
+    for pred in preds:
+        items.append(pred[idx])
+
+    return items
 
 def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
     """
@@ -93,7 +113,11 @@ def _load_result_paths(results_folder: Path, depth: Depth, classifier_name: str)
     return ResultPaths(regular=regular_path, summary=summary_path)
 
 
-def load_summary_results(results_folder: Path, depth: Depth, classifier_name: str, describe: bool = False) -> Optional[pd.DataFrame]:
+def load_summary_results(results_folder: Path,
+                         depth: Depth,
+                         classifier_name: str,
+                         describe: bool = False
+                         ) -> Optional[pd.DataFrame]:
     """
     Load summary results for specified depth and classifier.
 
@@ -168,8 +192,27 @@ def compare_summaries(results_folder: Path,
 
     return pd.DataFrame(data_list)
 
-def extract_from_comparison(comparison_data: 'pd.DataFrame', metric: str) -> 'pd.DataFrame':
-    """"""
+
+def extract_from_comparison(comparison_data: 'pd.DataFrame', metric: str) -> Tuple[List[str], List]:
+    """
+    Extracts specified metric data and classifier names from a given comparison DataFrame.
+
+    This function checks if the provided metric exists in the columns of the given DataFrame.
+    If the metric is present, it retrieves the values of the metric as well as the
+    classifier names.
+
+    Args:
+        comparison_data (pd.DataFrame): A DataFrame containing comparison data, including
+            metrics and classifier names.
+        metric (str): The name of the metric to extract from the comparison data.
+
+    Returns:
+        Tuple[List[str], List]: A tuple containing a list of classifier names and a list
+            of metric values.
+
+    Raises:
+        ValueError: If the specified metric is not found in the DataFrame columns.
+    """
     if metric not in comparison_data.columns:
         raise ValueError(f"Metric '{metric}' not found in comparison data.")
 

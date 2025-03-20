@@ -3,6 +3,31 @@ import numpy as np
 from typing import Optional
 
 
+def validate_image(image: np.ndarray) -> None:
+    """
+    Validates the input image by checking its existence, dimensions, type, and pixel value range.
+    Raises an error if any validation fails.
+
+    Args:
+        image (np.ndarray): The input image array to validate.
+
+    Raises:
+        ValueError: If the input image is None.
+        ValueError: If the input image has no dimensions or is empty.
+        ValueError: If the input image is not in RGB format (does not have 3 channels).
+        ValueError: If the input image type is not np.uint8.
+        ValueError: If the input image pixel values exceed the range of 0 to 255.
+    """
+    if image is None:
+        raise ValueError("Image didn't found. Please check your input.")
+    if image.shape[0] == 0 or image.shape[1] == 0 or image.size == 0:
+        raise ValueError("Image is empty")
+    if image.dtype != np.uint8:
+        raise ValueError("Image must be of type uint8")
+    if np.max(image) > 255:
+        raise ValueError("Image pixel values must be between 0 and 255")
+
+
 def load_image(file_path: str) -> Optional[np.ndarray]:
     """
     Loads an image from a file path and converts it to RGB format if it is a color image.
@@ -26,9 +51,7 @@ def load_image(file_path: str) -> Optional[np.ndarray]:
 
     try:
         image = cv2.imread(file_path)
-        if image is None:
-            print(f"Failed to load image: {file_path}")
-            return None
+        validate_image(image)
 
         # Convert only if image is not grayscale
         if len(image.shape) == 3:

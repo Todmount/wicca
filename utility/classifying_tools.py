@@ -111,70 +111,6 @@ def get_prediction(image: np.ndarray,
     return decode_predictions(preds, top=top)
 
 
-def classify_images_n_icons_from_folder(classifier: Dict[str, Any],
-                                        folder: str,
-                                        coder: Any,
-                                        depth: Depth,
-                                        top: int = 5,
-                                        interpolation: int = cv2.INTER_AREA
-                                        ) -> Dict[str, Any]:
-    """
-    Returns top predictions for the images and their icons.
-
-    Parameters:
-         classifier (dict): image classifier
-         folder (str): folder with images to be classified
-         coder (WaveletCoder): wavelet coder
-         depth (int): the depth of the discrete wavelet transform (DWT)
-         top (int): number of top predicted classes (obsolete)
-         interpolation (int): type of interpolation
-
-    Returns:
-        predictions for each image in the folder
-    """
-    dir_list = os.listdir(folder)
-
-    results = dict()
-
-    for file_name in dir_list:
-        image = load_image(f'{folder}/{file_name}')
-
-        resized = cv2.resize(image, classifier[SHAPE], interpolation=interpolation)
-
-        resized_predictions = get_prediction(resized, classifier)
-
-        icon = coder.get_small_copy(image, depth)
-        resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=interpolation)
-
-        icon_predictions = get_prediction(resized_icon, classifier, top)
-
-        results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
-
-    return results
-
-
-def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
-    """
-    Extract specified items from predictions
-
-    Parameters:
-    preds (list): list of predictions
-    idx (int): index of the item in predictions
-
-    Returns:
-    Array of extracted items
-    """
-
-    if idx > 2:
-        return None
-
-    items = []
-    for pred in preds:
-        items.append(pred[idx])
-
-    return items
-
-
 def normalize_depth(depth: Depth):
     """
     Normalizes the given depth input.
@@ -302,6 +238,36 @@ class ClassifierProcessor:
         result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
         summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
+    def _classify(self, classifier: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Returns top predictions for the images and their icons.
+
+        Args:
+             classifier ( Dict[str, Any]): image classifier
+
+        Returns:
+            predictions for each image in the folder
+        """
+        dir_list = os.listdir(self.path)
+
+        results = dict()
+
+        for file_name in dir_list:
+            image = load_image(f'{self.path}/{file_name}')
+
+            resized = cv2.resize(image, classifier[SHAPE], interpolation=self.interpolation)
+
+            resized_predictions = get_prediction(resized, classifier)
+
+            icon = self.coder.get_small_copy(image, self.depth)
+            resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=self.interpolation)
+
+            icon_predictions = get_prediction(resized_icon, classifier, self.top)
+
+            results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
+
+        return results
+
     def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
         """
         Processes a given item using the provided classifier and saves the resulting
@@ -321,9 +287,7 @@ class ClassifierProcessor:
 
         """
         name, classifier = item
-        res = classify_images_n_icons_from_folder(
-            classifier, self.path, self.coder, self.depth, self.top, self.interpolation
-        )
+        res = self._classify(classifier)
 
         # Using the rsltmgr module correctly as passed in the constructor
         res_df = self.rsltmgr.get_short_comparison(res, self.top)
@@ -335,9 +299,6 @@ class ClassifierProcessor:
         print(f"Classifier {name} processed")  # Shut down temporarily
         return name, sum_df
 
-    # import tensorflow as tf
-    # @tf.function(experimental_relax_shapes=True)
-    # @tf.autograph.experimental.do_not_convert
     def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
         """
         Processes multiple classifiers using parallel threads.
@@ -372,7 +333,7 @@ class ClassifierProcessor:
                 return results
             except concurrent.futures.TimeoutError:
                 print("Timeout occurred. Processing aborted.")
-                # return {}
+                return {}
             except ValueError as e:
                 print(f"An error occurred: {str(e)}")
                 # raise

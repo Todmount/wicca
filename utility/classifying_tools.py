@@ -140,10 +140,10 @@ def normalize_depth(depth: Depth):
         depth = tuple(depth)
     else:
         raise ValueError("Depth must be a positive integer, tuple, list, or range")
-    if all(isinstance(x, int) for x in depth):
+    if all(isinstance(x, int) and x > 0 for x in depth):
         return depth
     else:
-        raise ValueError("All depths must be integers")
+        raise ValueError("All depths must be integers greater than 0")
 
 
 def preserve_depth(func):
@@ -153,15 +153,12 @@ def preserve_depth(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        # Save original depth
         original_depth = self.depth
-
-        # Execute the function (which may modify depth internally)
-        result = func(self, *args, **kwargs)
-
-        # Restore original depth
-        self.depth = original_depth
-        return result
+        try:
+            result = func(self, *args, **kwargs)
+            return result
+        finally:
+            self.depth = original_depth
 
     return wrapper
 
@@ -214,7 +211,7 @@ class ClassifierProcessor:
         # Validating and defaulting wrong results path
         if not isinstance(self.results_folder, Path):
             logging.warning("Results folder provided is not a Path object. \n"
-                            "Using default folder {project_root}/results")
+                            f"Using default folder {RESULTS_FOLDER} instead \n")
             self.results_folder = RESULTS_FOLDER
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
@@ -296,7 +293,6 @@ class ClassifierProcessor:
         # Save CSV files inside the "results" folder
         self._save_results(res_df, sum_df, name)
 
-        print(f"Classifier {name} processed")  # Shut down temporarily
         return name, sum_df
 
     def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
@@ -323,21 +319,30 @@ class ClassifierProcessor:
                 output from `_process_core`. Returns an empty dictionary
                 in case of exceptions such as TimeoutError or ValueError.
         """
+        results = {}
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            try:
-                results = dict(executor.map(
-                    self._process_core,
-                    classifiers.items(),
-                    timeout=timeout
-                ))
-                return results
-            except concurrent.futures.TimeoutError:
-                print("Timeout occurred. Processing aborted.")
-                return {}
-            except ValueError as e:
-                print(f"An error occurred: {str(e)}")
-                # raise
-                return {}
+            # Submit all tasks
+            futures = {}
+            for key, value in classifiers.items():
+                future = executor.submit(self._process_core, (key, value))
+                futures[key] = future
+
+            # Process results with timeout
+            for key, future in futures.items():
+                try:
+                    # This will wait up to timeout seconds for this specific classifier
+                    result = future.result(timeout=timeout)
+                    results[key] = result
+                    print(f"Classifier {key} processed successfully")
+                except concurrent.futures.TimeoutError:
+                    print(f"Classifier {key} timed out after {timeout} seconds. Skipping.")
+                    # Cancel the future if possible (may not work if already running)
+                    future.cancel()
+                except Exception as e:
+                    print(f"Error processing classifier {key}: {str(e)}")
+                    # raise e
+        print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
+        return results
 
     def _single_classifier(self, name: str,
                            classifier_dict: Dict[str, Any],
@@ -400,6 +405,17 @@ class ClassifierProcessor:
             else:
                 raise
 
+    """
+    Note for future 
+    This is most likely not the best approach to handle depth
+    But there was a try to reimplement this part to pass self.depth as tuple further
+    The problem is `get_small_copy` from `wavelet_coder.py`, that should receive only int
+    If you refactor it to receive a tuple of depth it would break save logic
+    Saves would be just `name-depth-3,4...n` and values only from last depth
+    This is because we would basically pass all depths to this part of algorithm
+    And repeat it by all depth in for loop
+    LONG STRINGS ARE NOT GOOD, I know
+    """
     @preserve_depth
     def process_classifiers(self,
                             classifiers: Dict[str, Any],

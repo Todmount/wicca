@@ -225,7 +225,7 @@ def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[minimum, 100],
+                range=[minimum, max(metric)],
                 angle=360,
                 tickangle=0
             ),

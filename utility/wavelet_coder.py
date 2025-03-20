@@ -4,18 +4,7 @@ import cv2
 import numpy as np
 
 from utility.data_loader import get_padded_copy
-
-
-def validate_image(image: np.ndarray, transform_depth: int) -> None:
-    """
-    Validates parameters for get_small_copy method.
-    """
-    if not isinstance(image, np.ndarray):
-        raise ValueError(f"Error loading {image}. Image must be a numpy array")
-    # if transform_depth < 0:
-    #     raise ValueError("Transform depth must be non-negative")
-    # if not isinstance(transform_depth, int):
-    #     raise TypeError("Transform depth must be an integer")
+from utility.data_loader import validate_image
 
 
 class WaveletCoder(ABC):
@@ -49,7 +38,7 @@ class HaarCoder(WaveletCoder):
                        border_constant: int = 0
                        ) -> np.ndarray:
 
-        validate_image(image, transform_depth)
+        validate_image(image)
 
         ratio = self._ONE_STEP_RATIO ** transform_depth
         low_left = get_padded_copy(image, ratio, border_type, border_constant).astype(np.float32)

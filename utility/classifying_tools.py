@@ -163,6 +163,38 @@ def preserve_depth(func):
     return wrapper
 
 
+def format_proc_time(start: float, end: float) -> str:
+    """
+    Simple function to format processing time
+
+    Args:
+        start: Start time
+        end: End time
+
+    Returns:
+        Time string in format: hours:minutes:seconds
+    """
+    total_seconds = int(end - start)
+
+    # Convert to hours, minutes, seconds
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    # Build dynamic time string
+    time_parts = []
+    if hours > 0:
+        time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+    if minutes > 0 or (hours > 0 and seconds > 0):  # Show minutes if hours and seconds exist
+        time_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+    if seconds > 0 or not time_parts:  # Always show seconds if there are no other units
+        time_parts.append(f"{seconds} second{'s' if seconds > 1 else ''}")
+
+    time_str = " ".join(time_parts)
+
+    return time_str
+
+
 class ClassifierProcessor:
     """
     Handles the processing of classifiers.
@@ -250,7 +282,7 @@ class ClassifierProcessor:
         results = dict()
 
         for file_name in dir_list:
-            image = load_image(f'{self.path}/{file_name}')
+            image = load_image(self.path / file_name)
 
             resized = cv2.resize(image, classifier[SHAPE], interpolation=self.interpolation)
 
@@ -320,7 +352,7 @@ class ClassifierProcessor:
                 in case of exceptions such as TimeoutError or ValueError.
         """
         results = {}
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             # Submit all tasks
             futures = {}
             for key, value in classifiers.items():
@@ -335,7 +367,7 @@ class ClassifierProcessor:
                     results[key] = result
                     print(f"Classifier {key} processed successfully")
                 except concurrent.futures.TimeoutError:
-                    print(f"Classifier {key} timed out after {timeout} seconds. Skipping.")
+                    print(f"Classifier {key} timed out after {timeout} seconds. Skipping...")
                     # Cancel the future if possible (may not work if already running)
                     future.cancel()
                 except Exception as e:
@@ -454,33 +486,25 @@ class ClassifierProcessor:
         for depth in self.depth:
             self.depth = depth
             if isinstance(self.depth, int) and self.depth > 0:
+                _start_time = time.time()
                 print(f"Processing at depth {depth}")
                 depth_res = self._parallel_proc(classifiers, timeout)
                 results.update(depth_res)
-                print(f"Depth {depth} processed\n")
+                _end_time = time.time()
+                print(f"Depth {depth} processed in {int(_end_time - _start_time)} seconds\n")
             else:
                 print(f"Depth '{depth}' not valid. Skipping...\n")
 
         end_time = time.time()
-        total_seconds = int(end_time - start_time)
-        logging.info(f"Total processing time: {total_seconds} seconds")
+        # logging.info(f"Total processing time: {int(end_time - start_time)} seconds") # for debug
 
-        # Convert to hours, minutes, seconds
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        seconds = total_seconds % 60
-
-        # Build dynamic time string
-        time_parts = []
-        if hours > 0:
-            time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
-        if minutes > 0 or (hours > 0 and seconds > 0):  # Show minutes if hours and seconds exist
-            time_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
-        if seconds > 0 or not time_parts:  # Always show seconds if there are no other units
-            time_parts.append(f"{seconds} second{'s' if seconds > 1 else ''}")
-
-        time_str = " ".join(time_parts)
-        print(f"Total processing time: {time_str}")
+        total_time = format_proc_time(start_time, end_time)
+        print(f"Total processing time: {total_time}") # for user
         # You can uncomment this in case you want to see resulting dict for debugging
         # Be aware, that output will become cumbersome
         # return results
+
+
+
+
+

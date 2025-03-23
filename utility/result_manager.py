@@ -7,7 +7,7 @@ from typing import List, Optional, Union, Tuple
 import pandas as pd
 
 from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
-from utility.classifying_tools import normalize_depth
+from utility.classifying_tools import normalize_depth, validate_input_folder
 
 # Type aliases
 Depth = Union[int, Tuple[int, ...], List[int], range]
@@ -39,6 +39,7 @@ def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
         items.append(pred[idx])
 
     return items
+
 
 def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
     """
@@ -114,25 +115,33 @@ def _load_result_paths(results_folder: Path, depth: Depth, classifier_name: str)
 
 
 def load_summary_results(results_folder: Path,
-                         depth: Depth,
                          classifier_name: str,
+                         depth: int,
                          describe: bool = False
                          ) -> Optional[pd.DataFrame]:
     """
-    Load summary results for specified depth and classifier.
+    Load summary results for specified individual depth and classifier.
 
     Args:
-        results_folder(Path): Folder you specified containing results
-        depth: The depth parameter used in the classification
-        classifier_name: Name of the classifier
-        describe: If True, prints details about the summary results
+        results_folder (Path): Folder you specified containing results
+        depth (int): The depth parameter used in the classification
+        classifier_name (str): Name of the classifier
+        describe (bool): If True, prints details about the summary results
 
     Returns:
         DataFrame containing the summary results
     """
+    validate_input_folder(results_folder, ftype='result')
     if not isinstance(describe, bool):
-        logging.warning("describe parameter is not a boolean. Defaulting to False")
+        logging.warning("Describe parameter is not a boolean. Defaulting to False")
         describe = False
+    if not isinstance(depth, int):
+        logging.warning("Depth parameter is not an integer. Please check your input. \nTrying to load summary results for depth 3.")
+        depth = 3
+    if not isinstance(classifier_name, str):
+        logging.error("Classifier name is not a string. You should specify the classifier name from the dict of classifiers. \nExiting the program.")
+        raise SystemExit(1)
+
     try:
         paths = _load_result_paths(results_folder, depth, classifier_name)
         summary_df = pd.read_csv(paths.summary)
@@ -144,10 +153,12 @@ def load_summary_results(results_folder: Path,
             print("First few rows:")
             summary_df.head()
         return summary_df
-
-    except Exception as e:
-        print(f"{e}")
-        return None
+    except FileNotFoundError:
+        logging.exception(f"`load_summary_results`"
+                          f"No summary results found for {classifier_name} at depth {depth}",
+                          exc_info=True,
+                          stack_info=True)
+        # return {}
 
 
 def compare_summaries(results_folder: Path,

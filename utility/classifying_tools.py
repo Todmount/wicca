@@ -9,8 +9,8 @@ from typing import Any, Dict, Callable, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from functools import wraps
+from tqdm import tqdm
 
 from utility.data_loader import load_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER
@@ -81,7 +81,7 @@ def load_models(models: Dict[str, int]) -> Dict[str, Any]:
         classifiers_dict[name] = load_single_model(model_class, **kwargs)
 
     end = time.time()
-    print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
+    # print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
     return classifiers_dict
 
 
@@ -195,56 +195,108 @@ def format_proc_time(start: float, end: float) -> str:
     return time_str
 
 
+def _normalize_folder(folder: Union[str, Path]) -> Path:
+    """Normalizes a folder path"""
+    if not isinstance(folder, (Path, str)):
+        msg = f"Invalid input type: {type(folder)}. Expected str or Path."
+        logging.error(msg)
+        raise TypeError(msg)
+    return Path(folder)
+
+
+def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path:
+    """Handles folder-related errors"""
+    folder = _normalize_folder(folder)
+    if not folder.exists():
+        msg = f"Provided {ftype} folder: '{folder}' does not exist."
+        logging.error(msg)
+        raise FileNotFoundError(msg)
+    if not folder.is_dir():
+        msg = f"Provided {ftype} folder: '{folder}' is not a directory."
+        logging.error(msg)
+        raise NotADirectoryError(msg)
+    try:
+        # Test access permissions by listing contents
+        next(folder.iterdir(), None)
+    except PermissionError:
+        msg = f"Provided {ftype} folder: '{folder}' is not accessible."
+        logging.error(msg)
+        raise PermissionError(msg)
+
+    return folder
+
+
+def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Optional[Path]:
+    """Validates a data folder path"""
+    folder = _handle_folder_errors(folder, ftype)
+
+    # Check if folder is empty
+    if not any(folder.iterdir()):
+        msg = f"The folder '{folder}' is empty. Please provide a non-empty folder. \nExiting... \n"
+        logging.error(msg)
+        raise ValueError(msg)
+
+    return folder
+
+
+def validate_output_folder(folder: Union[str, Path], ftype: str = 'result') -> Optional[Path]:
+    """Validates results folder path"""
+    folder = _handle_folder_errors(folder, ftype)
+
+    # Check if folder is not empty and prompt user
+    if any(folder.iterdir()):
+        user_input = input(
+            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? (y/N): ").strip().lower()
+        if user_input not in {"y", "yes"}:
+            logging.info("User chose not to overwrite existing results. \nExiting...")
+            sys.exit(0)
+
+    return folder
+
+
 class ClassifierProcessor:
     """
-    Handles the processing of classifiers.
+    Handles the processing of classifiers. See __init__ for more details.
 
     Provides functionality to process single classifiers, multiple
     classifiers with parallel execution, and classifiers across multiple
-    transformation depths. Also includes method for visualizing compression effects.
-
-    Attributes:
-        path (str): Path to the folder containing images for classification.
-        coder (object): Wavelet coder instance used for image compression and resizing.
-        depth (Union[int, Tuple[int, ...], List[int], range]): Depth(s) of transformation
-            for wavelet compression.
-        interpolation (int): Interpolation method used for image resizing (e.g., cv2.INTER_AREA).
-        results_folder (str): Path to the folder for saving classification and comparison results.
-        top (int): Number of top classes to consider during classification.
-        rsltmgr (module): Result manager module that provides methods like get_short_comparison.
+    transformation depths.
     """
 
     def __init__(self,
-                 path: Union[str, Path],
-                 coder: Any,
-                 depth: Depth,
+                 data_folder: Union[str, Path],
+                 wavelet_coder: Any,
+                 transform_depth: Depth,
                  interpolation: int,
-                 top: int,
-                 rsltmgr,
-                 results_folder=RESULTS_FOLDER):
+                 top_classes: int,
+                 result_manager,
+                 results_folder: Union[str, Path] = RESULTS_FOLDER):
         """
-        Initializes the object with provided attributes and normalizes various inputs
-        for depth. Ensures depth is consistently treated as a tuple for subsequent
-        operations. Defaults results folder if not provided or not a Path object.
-        Raises:
-            ValueError if the depth parameter is not of an expected type.
+        Initializes an instance of a class and validates input parameters to ensure they
+        comply with expected types and values. Handles potential issues with the `depth`
+        parameter by normalizing it and ensures a valid results folder is assigned.
+
+        Args:
+            data_folder (Union[str, Path]): The path to the resources or directory.
+            wavelet_coder (module): Module containing the wavelet processing logic.
+            transform_depth (Depth): Provided depth. It can be int, tuple, list, or range. All elements must be positive integers.
+            interpolation (int): Configures interpolation level for operations.
+            top_classes (int): Limits the number of classes to be compared for each image and icon.
+            result_manager (module): Module containing the results management logic.
+            results_folder (Union[str, Path]): Directory for storing results; falls back to
+                a default path if the provided value is invalid.
         """
-        self.path = path
-        self.coder = coder
-        self.depth = depth
-        self.top = top
+        self.path = validate_input_folder(data_folder)
+        self.coder = wavelet_coder
+        self.depth = normalize_depth(transform_depth)
+        if isinstance(top_classes, int) and top_classes > 0:
+            self.top = top_classes
+        else:
+            logging.error(f"Top classes must be a non-negative integer. Please provide a valid value")
+            raise SystemExit(1)
         self.interpolation = interpolation
-        self.results_folder = results_folder
-        self.rsltmgr = rsltmgr
-
-        # Normalizing different inputs for various depths
-        self.depth = normalize_depth(self.depth)
-
-        # Validating and defaulting wrong results path
-        if not isinstance(self.results_folder, Path):
-            logging.warning("Results folder provided is not a Path object. \n"
-                            f"Using default folder {RESULTS_FOLDER} instead \n")
-            self.results_folder = RESULTS_FOLDER
+        self.results_folder = validate_output_folder(results_folder)
+        self.rsltmgr = result_manager
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
@@ -448,6 +500,7 @@ class ClassifierProcessor:
     And repeat it by all depth in for loop
     LONG STRINGS ARE NOT GOOD, I know
     """
+
     @preserve_depth
     def process_classifiers(self,
                             classifiers: Dict[str, Any],
@@ -499,12 +552,7 @@ class ClassifierProcessor:
         # logging.info(f"Total processing time: {int(end_time - start_time)} seconds") # for debug
 
         total_time = format_proc_time(start_time, end_time)
-        print(f"Total processing time: {total_time}") # for user
+        print(f"Total processing time: {total_time}")  # for user
         # You can uncomment this in case you want to see resulting dict for debugging
         # Be aware, that output will become cumbersome
         # return results
-
-
-
-
-

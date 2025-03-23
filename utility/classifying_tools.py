@@ -11,10 +11,15 @@ import cv2
 import numpy as np
 import pandas as pd
 from functools import wraps
-from tqdm import tqdm
 
 from utility.data_loader import load_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER
+
+if 'ipykernel' in sys.modules:
+    from IPython.display import display, Markdown
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 # Logging message formatting
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -302,6 +307,7 @@ class ClassifierProcessor:
         self.interpolation = interpolation
         self.results_folder = validate_output_folder(results_folder)
         self.rsltmgr = result_manager
+        print(f"Gathering info...")
         self._log_init_info() if log_info else None
 
     def _log_init_info(self):
@@ -329,7 +335,7 @@ class ClassifierProcessor:
 
         # Get image resolution statistics if images exist
         if image_count > 0:
-            sample_size = min(50, image_count) # Limit to 50 images for performance
+            sample_size = min(50, image_count)  # Limit to 50 images for performance
             sampled_files = random.sample(image_files, sample_size) if image_count > sample_size else image_files
 
             width, height = [], []
@@ -359,8 +365,6 @@ class ClassifierProcessor:
 
             # Use a cleaner output approach for Jupyter
             if 'ipykernel' in sys.modules:
-                from IPython.display import display, Markdown
-
                 # Create a nicely formatted markdown summary
                 summary = f"""
 #### Image Processing Configuration

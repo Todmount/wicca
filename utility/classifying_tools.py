@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import random
 import logging
 import concurrent.futures
 from pathlib import Path
@@ -17,6 +18,7 @@ from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RE
 
 # Logging message formatting
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+logging.getLogger().setLevel(logging.INFO)
 
 # Type aliases
 ModelClass = Callable
@@ -270,7 +272,8 @@ class ClassifierProcessor:
                  interpolation: int,
                  top_classes: int,
                  result_manager,
-                 results_folder: Union[str, Path] = RESULTS_FOLDER):
+                 results_folder: Union[str, Path] = RESULTS_FOLDER,
+                 log_info: bool = True):
         """
         Initializes an instance of a class and validates input parameters to ensure they
         comply with expected types and values. Handles potential issues with the `depth`
@@ -285,6 +288,7 @@ class ClassifierProcessor:
             result_manager (module): Module containing the results management logic.
             results_folder (Union[str, Path]): Directory for storing results; falls back to
                 a default path if the provided value is invalid.
+            log_info (bool): Controls whether to log information about the initialized instance.
         """
         self.path = validate_input_folder(data_folder)
         self.coder = wavelet_coder
@@ -292,11 +296,95 @@ class ClassifierProcessor:
         if isinstance(top_classes, int) and top_classes > 0:
             self.top = top_classes
         else:
-            logging.error(f"Top classes must be a non-negative integer. Please provide a valid value")
-            raise SystemExit(1)
+            msg = f"Top classes must be a non-negative integer. Please provide a valid value"
+            logging.error(msg)
+            raise ValueError(msg)
         self.interpolation = interpolation
         self.results_folder = validate_output_folder(results_folder)
         self.rsltmgr = result_manager
+        self._log_init_info() if log_info else None
+
+    def _log_init_info(self):
+        """Logs information about the initialized instance"""
+        # Count images
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif']
+        image_files = [f for f in self.path.glob('**/*') if f.is_file()
+                       and f.suffix.lower() in image_extensions]
+        image_count = len(image_files)
+
+        # Map interpolation integer values to cv2 constant names
+        interpolation_map = {
+            0: "cv2.INTER_NEAREST",
+            1: "cv2.INTER_LINEAR",
+            2: "cv2.INTER_CUBIC",
+            3: "cv2.INTER_AREA",
+            4: "cv2.INTER_LANCZOS4",
+            5: "cv2.INTER_LINEAR_EXACT",
+            6: "cv2.INTER_NEAREST_EXACT",
+            7: "cv2.INTER_MAX",
+            8: "cv2.WARP_FILL_OUTLIERS",
+            16: "cv2.WARP_INVERSE_MAP"
+        }
+        interpolation_name = interpolation_map.get(self.interpolation, f"Unknown ({self.interpolation})")
+
+        # Get image resolution statistics if images exist
+        if image_count > 0:
+            sample_size = min(50, image_count) # Limit to 50 images for performance
+            sampled_files = random.sample(image_files, sample_size) if image_count > sample_size else image_files
+
+            width, height = [], []
+
+            for img_path in sampled_files:
+                try:
+                    img = cv2.imread(str(img_path))
+                    width.append(img.shape[1])
+                    height.append(img.shape[0])
+                except Exception as e:
+                    logging.warning(f"Error reading image {img_path}: {e}")
+                    continue
+
+            if width and height:
+                mean_width = int(np.mean(width))
+                mean_height = int(np.mean(height))
+
+                # Calculate mean resolution (pixels)
+                mean_resolution = sum(w * h for w, h in zip(width, height)) / len(width)
+
+                imgs_dims = f"{mean_width}x{mean_height} px"
+                # Format resolution in a more human-readable way
+                if mean_resolution >= 1_000_000:
+                    res_info = f"{mean_resolution / 1_000_000:.1f} MP ({(int(mean_resolution))} pixels)"
+                else:
+                    res_info = f"{(int(mean_resolution))} pixels"
+
+            # Use a cleaner output approach for Jupyter
+            if 'ipykernel' in sys.modules:
+                from IPython.display import display, Markdown
+
+                # Create a nicely formatted markdown summary
+                summary = f"""
+#### Image Processing Configuration
+- **Data folder:** {self.path}
+- **Number of images:** {image_count}
+- **Mean image dimensions:** {imgs_dims}
+- **Mean image resolution:** {res_info}
+- **Transform depth:** {self.depth}
+- **Interpolation:** {interpolation_name}
+- **Top classes:** {self.top}
+- **Results folder:** {self.results_folder}
+                """
+                display(Markdown(summary))
+            else:
+                # Regular logging for non-Jupyter environments
+                print("")  # Empty line for better readability
+                logging.info(f"Data folder: {self.path}")
+                logging.info(f"Number of images: {image_count}")
+                logging.info(f"Mean image dimensions: {imgs_dims}")
+                logging.info(f"Mean image resolution: {res_info}")
+                logging.info(f"Transform depth: {self.depth}")
+                logging.info(f"Interpolation: {interpolation_name}")
+                logging.info(f"Top classes: {self.top}")
+                logging.info(f"Results folder: {self.results_folder}\n")
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """

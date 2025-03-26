@@ -92,13 +92,13 @@ def show_image_vs_icon(image: np.ndarray,
     plt.show()
 
 
-def dwt_visualization(image: np.ndarray,
-                      depth_value: Depth,
-                      coder,
-                      border_width: int = 1,
-                      border_color: tuple = (255, 255, 255),
-                      figsize: Tuple[int, int] = None
-                      ) -> None:
+def show_icon_on_image(image: np.ndarray,
+                       depth_value: Depth,
+                       coder,
+                       border_width: int = 1,
+                       border_color: tuple = (255, 255, 255),
+                       figsize: Tuple[int, int] = None
+                       ) -> None:
     """
     Visualizes the Discrete Wavelet Transform (DWT) of an image by displaying the original image
     with a smaller transformed copy overlaid in the top-left corner. Optionally, a border can be
@@ -231,12 +231,7 @@ def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -
             ),
         ),
         showlegend=False,
-        title={
-            'text': title,
-            'xanchor': 'right',
-            'yanchor': 'top',
-            'x': 0.5,
-        }
+        title=title
     )
     fig.show()
 

@@ -1,20 +1,44 @@
 import os
 import sys
-import cv2
+import time
+import random
 import logging
-import numpy as np
-import matplotlib.pyplot as plt
 import concurrent.futures
-from typing import Optional, Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Callable, List, Optional, Tuple, Union
+
+import cv2
+import numpy as np
+import pandas as pd
+from functools import wraps
 
 from utility.data_loader import load_image
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON
+from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
+
+if 'ipykernel' in sys.modules:
+    from IPython.display import display, Markdown
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
+
+# Logging message formatting
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+# logging.getLogger().setLevel(logging.INFO)
+
+# Type aliases
+ModelClass = Callable
+ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
+ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
+Depth = Union[int, Tuple[int, ...], List[int], range]
+
+# Value for tqdm bar
+bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
 
 
-def load_classifier(model_class,
-                    shape: Tuple[int, int] = (224, 224),
-                    weights:str = 'imagenet'
-                    ) -> Optional[dict]:
+def load_single_model(model_class,
+                      shape: Tuple[int, int] = (224, 224),
+                      weights: str = 'imagenet'
+                      ) -> Optional[dict]:
     """
     Load a classifier model with error handling.
 
@@ -32,7 +56,7 @@ def load_classifier(model_class,
 
         return {
             MODEL: model_class(weights=weights),
-            PRE_INP: getattr(module,'preprocess_input'),
+            PRE_INP: getattr(module, 'preprocess_input'),
             DEC_PRED: getattr(module, 'decode_predictions'),
             SHAPE: shape
         }
@@ -41,249 +65,596 @@ def load_classifier(model_class,
         return None
 
 
+def load_models(models: ModelsDict) -> Dict[str, Any]:
+    """
+    Load multiple image classification models with progress tracking.
+
+    Args:
+        models: Dictionary mapping model names to either:
+               - a model class, or
+               - a tuple of (model_class, config_dict)
+
+    Returns:
+        Dictionary mapping model names to loaded classifier instances
+    """
+    start = time.time()
+    classifiers_dict = {}
+
+    with tqdm(models.items(), desc="Loading classifiers", bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]') as pbar:
+        for name, model_info in pbar:
+            # Check if this is a tuple (model with config) or just a model class
+            if isinstance(model_info, tuple):
+                model_class, kwargs = model_info
+            else:
+                model_class = model_info
+                kwargs = {}
+
+            classifiers_dict[name] = load_single_model(model_class, **kwargs)
+
+        end = time.time()
+        # print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
+        return classifiers_dict
+
+
 def get_prediction(image: np.ndarray,
                    classifier: dict,
                    top: int = 5
                    ) -> list:
-  """
-    Returns top predictions for the given image using the specified classifier
+    """
+      Returns top predictions for the given image using the specified classifier
 
-    Parameters:
-        image (numpy.ndarray): The loaded image to be classified
-        classifier (dict): image classifier
-        top (int): number of top predicted classes
+      Parameters:
+          image (numpy.ndarray): The loaded image to be classified
+          classifier (dict): image classifier
+          top (int): number of top predicted classes
+
+      Returns:
+          predictions for the image
+    """
+    model = classifier[MODEL]
+    preprocess_input = classifier[PRE_INP]
+    decode_predictions = classifier[DEC_PRED]
+
+    x = np.expand_dims(image, axis=0)
+    x = preprocess_input(x)
+    preds = model.predict(x)
+
+    return decode_predictions(preds, top=top)
+
+
+def normalize_depth(depth: Depth):
+    """
+    Normalizes the given depth input.
+
+    The function ensures the provided `depth` is converted into a uniform tuple of
+    integers, ensuring compatibility and usability in further operations. It raises
+    errors if the input does not conform to the expected types and conditions.
+
+    Args:
+        depth: The depth input to be normalized. It can be an integer greater than
+            0, a tuple, a list, or a range. A `None` value and invalid types will
+            raise respective errors.
 
     Returns:
-        predictions for the image
-  """
-  model = classifier[MODEL]
-  preprocess_input = classifier[PRE_INP]
-  decode_predictions = classifier[DEC_PRED]
+        A tuple of integers representing the normalized depth.
 
-  x = np.expand_dims(image, axis=0)
-  x = preprocess_input(x)
-  preds = model.predict(x)
-  
-  return decode_predictions(preds, top=top)
-
-
-def classify_images_n_icons_from_folder(classifier: dict,
-                                        folder: str,
-                                        coder: Any,
-                                        depth: int = 1,
-                                        top: int = 5,
-                                        interpolation: int = cv2.INTER_AREA
-                                        ) -> dict:
+    Raises:
+        ValueError: If depth is not provided (None).
+        ValueError: If depth is not a positive integer, tuple, list, or range.
+        ValueError: If any element in the depth is not an integer.
     """
-    Returns top predictions for the images and their icons.
+    if depth is None:
+        raise ValueError("Depth must be provided")
+    if isinstance(depth, int) and depth > 0:
+        depth = (depth,)
+    if isinstance(depth, (tuple, list, range)):
+        depth = tuple(depth)
+    else:
+        raise ValueError("Depth must be a positive integer, tuple, list, or range")
+    if all(isinstance(x, int) and x > 0 for x in depth):
+        return depth
+    else:
+        raise ValueError("All depths must be integers greater than 0")
 
-    Parameters:
-         classifier (dict): image classifier
-         folder (str): folder with images to be classified
-         coder (WaveletCoder): wavelet coder
-         depth (int): the depth of the discrete wavelet transform (DWT)
-         top (int): number of top predicted classes (obsolete)
-         interpolation (int): type of interpolation
+
+def preserve_depth(func):
+    """Decorator that preserves the original depth value.
+    Saves depth at the start of function and restores it at the end,
+    regardless of any changes made within the function."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        original_depth = self.depth
+        try:
+            result = func(self, *args, **kwargs)
+            return result
+        finally:
+            self.depth = original_depth
+
+    return wrapper
+
+
+def format_proc_time(start: float, end: float) -> str:
+    """
+    Simple function to format processing time
+
+    Args:
+        start: Start time
+        end: End time
 
     Returns:
-        predictions for each image in the folder
+        Time string in format: hours:minutes:seconds
     """
-    dir_list = os.listdir(folder)
+    total_seconds = int(end - start)
 
-    results = dict()
+    # Convert to hours, minutes, seconds
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
 
-    for file_name in dir_list:
-        image = load_image(f'{folder}/{file_name}')
+    # Build dynamic time string
+    time_parts = []
+    if hours > 0:
+        time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+    if minutes > 0 or (hours > 0 and seconds > 0):  # Show minutes if hours and seconds exist
+        time_parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+    if seconds > 0 or not time_parts:  # Always show seconds if there are no other units
+        time_parts.append(f"{seconds} second{'s' if seconds > 1 else ''}")
 
-        resized = cv2.resize(image, classifier[SHAPE], interpolation=interpolation)
+    time_str = " ".join(time_parts)
 
-        resized_predictions = get_prediction(resized, classifier)
-
-        icon = coder.get_small_copy(image, depth)
-        resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=interpolation)
-
-        icon_predictions = get_prediction(resized_icon, classifier, top)
-
-        results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
-
-    return results
+    return time_str
 
 
-def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
-    """
-    Extract specified items from predictions
+def _normalize_folder(folder: Union[str, Path]) -> Path:
+    """Normalizes a folder path"""
+    if not isinstance(folder, (Path, str)):
+        msg = f"Invalid input type: {type(folder)}. Expected str or Path."
+        logging.error(msg)
+        raise TypeError(msg)
+    return Path(folder)
 
-    Parameters:
-    preds (list): list of predictions
-    idx (int): index of the item in predictions
 
-    Returns:
-    Array of extracted items
-    """
+def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path:
+    """Handles folder-related errors"""
+    folder = _normalize_folder(folder)
+    if not folder.exists() and ftype == 'data':
+        msg = f"Provided {ftype} folder: '{folder}' does not exist."
+        logging.error(msg)
+        raise FileNotFoundError(msg)
+    elif not folder.exists():
+        msg = f"Provided {ftype} folder: '{folder}' does not exist.\nCreating folder..."
+        logging.warning(msg)
+        folder.mkdir(parents=True, exist_ok=True)
+    if not folder.is_dir():
+        msg = f"Provided {ftype} folder: '{folder}' is not a directory."
+        logging.error(msg)
+        raise NotADirectoryError(msg)
+    try:
+        # Test access permissions by listing contents
+        next(folder.iterdir(), None)
+    except PermissionError:
+        msg = f"Provided {ftype} folder: '{folder}' is not accessible."
+        logging.error(msg)
+        raise PermissionError(msg)
 
-    if idx > 2:
-        return None
+    return folder
 
-    items = []
-    for pred in preds:
-        items.append(pred[idx])
 
-    return items
+def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Optional[Path]:
+    """Validates a data folder path"""
+    folder = _handle_folder_errors(folder, ftype)
+
+    # Check if folder is empty
+    if not any(folder.iterdir()):
+        msg = f"The folder '{folder}' is empty. Please provide a non-empty folder. \nExiting... \n"
+        logging.error(msg)
+        raise ValueError(msg)
+
+    return folder
+
+
+def validate_output_folder(folder: Union[str, Path], ftype: str = 'result') -> Optional[Path]:
+    """Validates results folder path"""
+    folder = _handle_folder_errors(folder, ftype)
+
+    # Check if folder is not empty and prompt user
+    if any(folder.iterdir()):
+        user_input = input(
+            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? ([y]/n): ").strip().lower()
+        if user_input in {"n", "no", "not", "-", "nuh"}:
+            logging.info("User chose not to overwrite existing results. \nExiting...")
+            sys.exit(0)
+
+    return folder
 
 
 class ClassifierProcessor:
     """
-    A class to handle batch processing of multiple classifiers with the same parameters.
+    Handles the processing of classifiers. See __init__ for more details.
+
+    Provides functionality to process single classifiers, multiple
+    classifiers with parallel execution, and classifiers across multiple
+    transformation depths.
     """
 
     def __init__(self,
-                 path: str,
-                 coder: Any,
-                 depth: int,
+                 data_folder: Union[str, Path],
+                 wavelet_coder: Any,
+                 transform_depth: Depth,
                  interpolation: int,
-                 results_folder: str,
-                 top: int,
-                 rsltmgr):
+                 top_classes: int,
+                 result_manager,
+                 results_folder: Union[str, Path] = RESULTS_FOLDER,
+                 log_info: bool = True):
         """
-        Initialize the classifier processor with all required dependencies.
+        Initializes an instance of a class and validates input parameters to ensure they
+        comply with expected types and values. Handles potential issues with the `depth`
+        parameter by normalizing it and ensures a valid results folder is assigned.
 
-        Parameters:
-        -----------
-        path : str
-            Path to the folder containing images to classify
-        coder : object
-            Wavelet coder instance (like HaarCoder)
-        depth : int
-            The depth of transforming for wavelet compression
-        top : int
-            Number of top classes to use for comparison
-        interpolation : int
-            Type of interpolation used in resizing (e.g., cv2.INTER_AREA)
-        results_folder : str
-            Path to the folder where results will be saved
-        rsltmgr : module
-            Result manager module containing get_short_comparison function
+        Args:
+            data_folder (Union[str, Path]): The path to the resources or directory.
+            wavelet_coder (module): Module containing the wavelet processing logic.
+            transform_depth (Depth): Provided depth. It can be int, tuple, list, or range. All elements must be positive integers.
+            interpolation (int): Configures interpolation level for operations.
+            top_classes (int): Limits the number of classes to be compared for each image and icon.
+            result_manager (module): Module containing the results management logic.
+            results_folder (Union[str, Path]): Directory for storing results; falls back to
+                a default path if the provided value is invalid.
+            log_info (bool): Controls whether to log information about the initialized instance.
         """
-        self.path = path
-        self.coder = coder
-        self.depth = depth
-        self.top = top
+        self.path = validate_input_folder(data_folder)
+        self.coder = wavelet_coder
+        self.depth = normalize_depth(transform_depth)
+        if isinstance(top_classes, int) and top_classes > 0:
+            self.top = top_classes
+        else:
+            msg = f"Top classes must be a non-negative integer. Please provide a valid value"
+            logging.error(msg)
+            raise ValueError(msg)
         self.interpolation = interpolation
-        self.results_folder = results_folder
-        self.rsltmgr = rsltmgr
+        self.results_folder = validate_output_folder(results_folder)
+        self.rsltmgr = result_manager
+        self._log_init_info() if log_info else None
 
-        # Ensure results directory exists
-        os.makedirs(self.results_folder, exist_ok=True)
+    def _log_init_info(self):
+        """Logs information about the initialized instance"""
+        # Count images
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif']
+        image_files = [f for f in self.path.iterdir()
+                       if f.is_file() and f.suffix.lower() in image_extensions]
+        image_count = len(image_files)
 
-    # def process_classifier(self, item) -> Tuple[str, Any]:
-    def process_classifier(self, item: Tuple[str, Dict], name: str = None) -> Tuple[str, Any]:
+        # Map interpolation integer values to cv2 constant names
+        interpolation_map = {
+            0: "cv2.INTER_NEAREST",
+            1: "cv2.INTER_LINEAR",
+            2: "cv2.INTER_CUBIC",
+            3: "cv2.INTER_AREA",
+            4: "cv2.INTER_LANCZOS4",
+            5: "cv2.INTER_LINEAR_EXACT",
+            6: "cv2.INTER_NEAREST_EXACT",
+            7: "cv2.INTER_MAX",
+            8: "cv2.WARP_FILL_OUTLIERS",
+            16: "cv2.WARP_INVERSE_MAP"
+        }
+        interpolation_name = interpolation_map.get(self.interpolation, f"Unknown ({self.interpolation})")
+
+        # Get image resolution statistics if images exist
+        if image_count > 0:
+            sample_size = min(MAX_INFO_SAMPLE_SIZE, image_count)  # Limit to 50 images for performance
+            sampled_files = random.sample(image_files, sample_size) if image_count > sample_size else image_files
+
+            width, height = [], []
+
+            for img_path in tqdm(sampled_files, desc="Gathering info", bar_format=bar_format):
+                try:
+                    img = cv2.imread(str(img_path))
+                    width.append(img.shape[1])
+                    height.append(img.shape[0])
+                except Exception as e:
+                    logging.warning(f"Error reading image {img_path}: {e}")
+                    continue
+
+            if width and height:
+                mean_width = int(np.mean(width))
+                mean_height = int(np.mean(height))
+
+                # Calculate mean resolution (pixels)
+                mean_resolution = sum(w * h for w, h in zip(width, height)) / len(width)
+
+                imgs_dims = f"{mean_width}x{mean_height} px"
+                # Format resolution in a more human-readable way
+                if mean_resolution >= 1_000_000:
+                    res_info = f"{mean_resolution / 1_000_000:.1f} MP ({(int(mean_resolution))} pixels)"
+                else:
+                    res_info = f"{(int(mean_resolution))} pixels"
+
+            # Use a cleaner output approach for Jupyter
+            if 'ipykernel' in sys.modules:
+                summary = f"""
+#### Image Processing Configuration
+Note: For image stats was taken a sample of {sample_size} random images.
+You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.
+- **Data folder:** {self.path}
+- **Number of images:** {image_count}
+- **Mean image dimensions:** {imgs_dims}
+- **Mean image resolution:** {res_info}
+- **Transform depth:** {self.depth}
+- **Interpolation:** {interpolation_name}
+- **Top classes:** {self.top}
+- **Results folder:** {self.results_folder}
+                """
+                display(Markdown(summary))
+            else:
+                # Regular logging for non-Jupyter environments
+                print(f"\nNote: For image stats was taken a sample of {sample_size} random images."
+                      "\nYou may change the max sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.")
+                print(f"Data folder: {self.path}")
+                print(f"Number of images: {image_count}")
+                print(f"Mean image dimensions: {imgs_dims}")
+                print(f"Mean image resolution: {res_info}")
+                print(f"Transform depth: {self.depth}")
+                print(f"Interpolation: {interpolation_name}")
+                print(f"Top classes: {self.top}")
+                print(f"Results folder: {self.results_folder}")
+
+    def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
-        Process a single classifier.
+        Saves result and summary data to CSV files in a folder specific to the current depth.
 
-        Parameters:
-        -----------
-        item : tuple
-            A tuple containing (name, classifier)
+        The method creates a results folder if it does not already exist, using the configured
+        `results_folder` attribute and appending the current depth. The result and summary
+        data are saved as separate CSV files with names including the given `name` and the
+        current depth.
+
+        Args:
+            result: DataFrame containing the result data to be saved.
+            summary: DataFrame containing the summary data to be saved.
+            name: Base name of the files to be saved, to which depth and type will be appended.
+        """
+        results_folder = self.results_folder / f"depth-{self.depth}"
+        if not results_folder.exists():
+            logging.info(f"Created folder {results_folder}")
+            results_folder.mkdir(parents=True, exist_ok=True)
+        result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
+        summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
+
+
+    def _classify(self, classifier: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Returns top predictions for the images and their icons.
+
+        Args:
+             classifier ( Dict[str, Any]): image classifier
 
         Returns:
-        --------
-        tuple
-            A tuple of (name, summary_dataframe)
+            predictions for each image in the folder
         """
+        dir_list = os.listdir(self.path)
 
-        # Handle both tuple input and direct classifier input
-        if isinstance(item, tuple) and len(item) == 2:
-            name, classifier = item
-        else:
-            if name is None:
-                # Try to get the name from the classifier object if possible
-                try:
-                    name = item.__class__.__name__
-                except AttributeError:
-                    name = "UnnamedClassifier"
-            classifier = item
+        results = dict()
 
-        res = classify_images_n_icons_from_folder(
-            classifier, self.path, self.coder, self.depth, self.top, self.interpolation
-        )
+        for file_name in dir_list:
+            image = load_image(self.path / file_name)
+
+            resized = cv2.resize(image, classifier[SHAPE], interpolation=self.interpolation)
+
+            resized_predictions = get_prediction(resized, classifier)
+
+            icon = self.coder.get_small_copy(image, self.depth)
+            resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=self.interpolation)
+
+            icon_predictions = get_prediction(resized_icon, classifier, self.top)
+
+            results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
+
+        return results
+
+    def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
+        """
+        Processes a given item using the provided classifier and saves the resulting
+        data.
+
+        The method performs classification of images and icons from a folder using the
+        given classifier. It then generates a summary of the classification results
+        and saves the results as CSV files. Finally, the method prints a message
+        indicating that the classifier processing is complete.
+
+        Args:
+            item: Tuple containing the name of the classifier and the classifier object.
+
+        Returns:
+            A tuple containing the name of the classifier and the summary dataframe
+            generated from the classification results.
+
+        """
+        name, classifier = item
+        res = self._classify(classifier)
 
         # Using the rsltmgr module correctly as passed in the constructor
         res_df = self.rsltmgr.get_short_comparison(res, self.top)
-        # res_df = res_df.style.format('{:.4f}')
+        sum_df = res_df.describe()
 
         # Save CSV files inside the "results" folder
-        res_df.to_csv(os.path.join(self.results_folder, f"{name}-depth_{self.depth}.csv"))
-        sum_df = res_df.describe()
-        sum_df.to_csv(os.path.join(self.results_folder, f"{name}-summary-depth_{self.depth}.csv"))
+        self._save_results(res_df, sum_df, name)
 
         return name, sum_df
 
-    def process_all_classifiers(self, classifiers: Dict[str, Dict], timeout: int = 3600) -> Dict[str, Any]:
+    def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
         """
-        Process multiple classifiers in parallel.
+        Processes multiple classifiers using parallel threads.
 
-        Parameters:
-        -----------
-        classifiers : dict
-            Dictionary of classifiers where keys are names and values are classifier instances
-        timeout : int, optional
-            Maximum execution time in seconds, defaults to 1 hour
+        This method runs the classifier tasks in parallel threads using
+        concurrent.futures.ThreadPoolExecutor. It supports a timeout
+        parameter for handling cases where the execution exceeds the
+        allowed time limit. Captures and handles exceptions such as
+        TimeoutError and ValueError if encountered during execution.
+
+        Args:
+            classifiers (Dict[str, Any]): A dictionary where keys
+                represent classifier names and values represent the
+                corresponding data or objects to process.
+            timeout (int, optional): The maximum time, in seconds, to
+                allow for processing. Defaults to None, meaning no
+                timeout is applied.
+
+        Returns:
+            Dict[str, Any]: A dictionary of processed results where
+                keys match the classifier names and values match the
+                output from `_process_core`. Returns an empty dictionary
+                in case of exceptions such as TimeoutError or ValueError.
+        """
+        results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit all tasks
+            futures = {}
+            for key, value in classifiers.items():
+                future = executor.submit(self._process_core, (key, value))
+                futures[key] = future
+
+            # Process results with timeout
+            for key, future in tqdm(futures.items(), desc=f"Processing depth {self.depth}", bar_format=bar_format):
+                try:
+                    # This will wait up to timeout seconds for this specific classifier
+                    result = future.result(timeout=timeout)
+                    results[key] = result
+                    # print(f"Classifier {key} processed successfully")
+                except concurrent.futures.TimeoutError:
+                    logging.warning(f"Classifier {key} timed out after {timeout} seconds. Skipping...")
+                    # Cancel the future if possible (may not work if already running)
+                    future.cancel()  # don't work as expected
+                except Exception as e:
+                    logging.warning(f"Error processing classifier {key}: {str(e)}")
+                    # raise e
+        # print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
+        return results
+
+    def _single_classifier(self, name: str,
+                           classifier_dict: Dict[str, Any],
+                           timeout: int = None
+                           ):
+        """
+        Helper function to process a single classifier by wrapping it and validating input parameters.
+
+        This function validates the provided classifier and name, wraps the classifier
+        into a dictionary format, and delegates the processing to another method with
+        a given timeout.
+
+        Args:
+            name: Name of the classifier to be processed.
+            classifier_dict: A dictionary containing classifier details. Must include
+                a 'MODEL' key to specify the classifier model.
+            timeout: Timeout in seconds for processing. Defaults to None. Recommended
+                to be set to 3600 seconds (1 hour) or more.
+
+        Raises:
+            ValueError: If the name is not provided.
+            ValueError: If the classifier_dict is not a dictionary or does not contain
+                the 'MODEL' key.
+        """
+
+        # Validate inputs
+        if not name:
+            raise ValueError("Name must be provided for single classifier")
+        if not isinstance(classifier_dict, dict) or MODEL not in classifier_dict:
+            raise ValueError(f"Classifier must be a dictionary containing a '{MODEL}' key")
+        if timeout is None or not isinstance(timeout, int) or timeout < 0:
+            logging.warning("Timeout for processing is not set or invalid. It's value should be a positive integer.\n"
+                            "It is recommended to set it to 3600 seconds (1 hour) or more.\n"
+                            "Defaulting to None.")
+            timeout = None
+
+        # Wrap and process the classifier
+        wrapped_classifier = {name: classifier_dict}
+        return self.process_classifiers(wrapped_classifier, timeout)
+
+    def process_single_classifier(self, *args, **kwargs):
+        """
+        Safely process a classifier with helpful error messages for common mistakes.
+
+        This is a helper wrapper around process_single_classifier that catches and
+        explains common errors.
 
         Returns:
         --------
-        dict
-            Dictionary with results where keys are classifier names and values are summary dataframes
+        The result from process_single_classifier or None if an error occurs
         """
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            try:
-                results = dict(executor.map(
-                    self.process_classifier,
-                    classifiers.items(),
-                    timeout=timeout
-                ))
-                return results
-            except concurrent.futures.TimeoutError:
-                print("Processing timed out")
-                return {}
-            except Exception as e:
-                print(f"An error occurred: {str(e)}")
-                return {}
+        try:
+            return self._single_classifier(*args, **kwargs)
+        except TypeError as e:
+            if "missing 1 required positional argument: 'classifier_dict'" in str(e):
+                logging.error("You need to provide both the name and the classifier dictionary.\n"
+                              "Correct usage: process_single_classifier(name, classifier_dict)\n"
+                              "Example: process_single_classifier('VGG19', classifiers['VGG19'])\n")
+                return None
+            else:
+                raise
 
-    def show_image_vs_icon(self, image: np.ndarray) -> None:
+    """
+    Note for future 
+    This is most likely not the best approach to handle depth
+    But there was a try to reimplement this part to pass self.depth as tuple further
+    The problem is `get_small_copy` from `wavelet_coder.py`, that should receive only int
+    If you refactor it to receive a tuple of depth it would break save logic
+    Saves would be just `name-depth-3,4...n` and values only from last depth
+    This is because we would basically pass all depths to this part of algorithm
+    And repeat it by all depth in for loop
+    LONG STRINGS ARE NOT GOOD, I know
+    """
+
+    @preserve_depth
+    def process_classifiers(self,
+                            classifiers: Dict[str, Any],
+                            timeout: int = None
+                            ):
         """
-        Displays an original image alongside its compressed version with specified
-        transformation depth. The method also prints the size of both images.
+        Processes classifiers across specified depths with optional timeout.
 
-        This function visualizes the effect of compression on an image by comparing
-        the original image with its compressed counterpart. The compression is
-        performed using the `get_small_copy` method of the `coder` object, with the
-        specified depth defined by `self.depth`. The sizes of both the original and
-        compressed images are printed for reference.
+        This method iterates over configured depths to process classifiers. It provides
+        parallel processing capabilities and logs comprehensive time statistics, including
+        dynamic formatting of the elapsed time.
 
         Args:
-            image (np.ndarray): The original image to be compared with its compressed version.
-            It must be a non-empty instance of `np.ndarray`.
+            classifiers (Dict[str, Any]): A dictionary of classifiers to be processed. The key
+                is the classifier name, and the value is its configuration or data.
+            timeout (int, optional): Specifies the timeout value for processing classifiers.
 
         Raises:
-            ValueError: If the provided image is None, has zero size, or is not an
-            instance of `np.ndarray`.
+            Exception: If attempting to process a single classifier by mistake .
         """
 
-        if image is None:
-            raise ValueError("Image did not load correctly. Please check the file path and try again.")
+        # Handle a single classifier
+        if MODEL in classifiers:
+            raise Exception("\nIt appears you are trying to process a single classifier.\n"
+                            "Use process_single_classifier instead.")
 
-        original = image
-        compressed = self.coder.get_small_copy(
-            image=original,
-            transform_depth=self.depth
-        )
+        # Debugging
+        # If I forget to delete, consider it an eastern egg
+        if timeout == 1984:
+            raise Exception("Big Brother is watching you...\n"
+                            "If you want to proceed try another timeout\n")
 
-        # Display original vs. compressed
-        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-        axes[0].imshow(original), axes[0].set_title("Original Image")
-        axes[1].imshow(compressed), axes[1].set_title(f"Compressed Image, depth = {self.depth}")
-        plt.show()
+        results = {}
 
-        # Print image statistics
-        print(f"Original size: {original.shape}")
-        print(f"Compressed size: {compressed.shape}")
+        start_time = time.time()
+        for depth in self.depth:
+            self.depth = depth
+            if isinstance(self.depth, int) and self.depth > 0:
+                _start_time = time.time()
+                # print(f"\nProcessing at depth {depth}")
+                depth_res = self._parallel_proc(classifiers, timeout)
+                results.update(depth_res)
+                _end_time = time.time()
+                # print(f"Depth {depth} processed in {int(_end_time - _start_time)} seconds\n")
+            else:
+                print(f"Depth '{depth}' not valid. Skipping...\n")
+
+        end_time = time.time()
+        logging.info(f"Total processing time: {int(end_time - start_time)} seconds")  # for debug
+
+        # total_time = format_proc_time(start_time, end_time)
+        # print(f"Total processing time: {total_time}")  # for user
+        # You can uncomment this in case you want to see resulting dict for debugging
+        # Be aware, that output will become cumbersome
+        # return results

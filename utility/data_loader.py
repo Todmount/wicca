@@ -3,27 +3,55 @@ import numpy as np
 from typing import Optional
 
 
-def load_image(file_path: str) -> Optional[np.ndarray]:
+def validate_image(image: np.ndarray) -> None:
     """
-    Load an image from the specified file path using OpenCV.
+    Validates the input image by checking its existence, dimensions, type, and pixel value range.
+    Raises an error if any validation fails.
 
-    Parameters:
-        file_path (str): The path to the image file.
-
-    Returns:
-        Optional[numpy.ndarray]: The loaded image in RGB format, or None if loading fails.
+    Args:
+        image (np.ndarray): The input image array to validate.
 
     Raises:
-        ValueError: If file_path is empty or None
+        ValueError: If the input image is None.
+        ValueError: If the input image has no dimensions or is empty.
+        ValueError: If the input image is not in RGB format (does not have 3 channels).
+        ValueError: If the input image type is not np.uint8.
+        ValueError: If the input image pixel values exceed the range of 0 to 255.
+    """
+    if image is None:
+        raise ValueError("Image didn't found. Please check your input.")
+    if image.shape[0] == 0 or image.shape[1] == 0 or image.size == 0:
+        raise ValueError("Image is empty")
+    if image.dtype != np.uint8:
+        raise ValueError("Image must be of type uint8")
+    if np.max(image) > 255:
+        raise ValueError("Image pixel values must be between 0 and 255")
+
+
+def load_image(file_path: str) -> Optional[np.ndarray]:
+    """
+    Loads an image from a file path and converts it to RGB format if it is a color image.
+
+    Reads an image file and attempts to convert it to RGB format when it is in color.
+    Returns the loaded image or None in case of failure. Raises a ValueError if the provided
+    file path is empty.
+
+    Args:
+        file_path (str): Path to the image file to be loaded.
+
+    Returns:
+        Optional[np.ndarray]: The loaded image as a NumPy array, or None if the image could not
+        be loaded.
+
+    Raises:
+        ValueError: If the file path is empty.
     """
     if not file_path:
         raise ValueError("File path cannot be empty")
 
     try:
         image = cv2.imread(file_path)
-        if image is None:
-            print(f"Failed to load image: {file_path}")
-            return None
+        validate_image(image)
 
         # Convert only if image is not grayscale
         if len(image.shape) == 3:
@@ -38,19 +66,27 @@ def load_image(file_path: str) -> Optional[np.ndarray]:
 def get_padded_copy(image: np.ndarray, ratio: int, border_type: int = cv2.BORDER_REPLICATE,
                     border_constant: int = 0) -> np.ndarray:
     """
-    Returns a padded copy of the image with height & width that are multiples of ratio
+    Pads an image to make its dimensions divisible by a specified ratio. The function
+    handles 2D (grayscale) and 3D (color) input images and allows different border
+    types and constant values for padding.
 
-    Parameters:
-        image (numpy.ndarray): The input image.
-        ratio (int): The input ratio.
-        border_type (int): The padding type.
-        border_constant (int): Fill value.
+    Args:
+        image (np.ndarray): Input image as a 2D or 3D numpy array.
+        ratio (int): Positive integer defining the divisibility constraint for the
+            image dimensions.
+        border_type (int, optional): Type of border for padding, as defined by
+            OpenCV constants. Defaults to `cv2.BORDER_REPLICATE`.
+        border_constant (int, optional): Constant pixel value for padding if
+            `border_type` is `cv2.BORDER_CONSTANT`. Defaults to 0.
 
     Returns:
-        numpy.ndarray: Padded image
+        np.ndarray: The padded image where dimensions are divisible by the given
+        ratio.
 
     Raises:
-        ValueError: If inputs are invalid
+        ValueError: If `image` is not a numpy array.
+        ValueError: If `ratio` is not a positive integer.
+        ValueError: If `image` does not have 2D or 3D dimensions.
     """
 
 

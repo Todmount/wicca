@@ -1,15 +1,16 @@
+import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, List
-import pandas as pd
 from itertools import product
+from pathlib import Path
+from typing import List, Optional, Union, Tuple
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-
+import pandas as pd
 
 from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
-from utility.classifying_tools import extract_item_from_preds
+from utility.classifying_tools import normalize_depth, validate_input_folder
+
+# Type aliases
+Depth = Union[int, Tuple[int, ...], List[int], range]
 
 
 @dataclass
@@ -18,110 +19,178 @@ class ResultPaths:
     summary: Path
 
 
-def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
+def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
     """
-    Compare results of classifying source vs. icons
+    Extract specified items from predictions
 
     Parameters:
-      results (dict): results of classifying
-      top (int): top classes count
+    preds (list): list of predictions
+    idx (int): index of the item in predictions
+
     Returns:
-      Dataframe summarizing classifying results
+    Array of extracted items
     """
+
+    if idx > 2:
+        return None
+
+    items = []
+    for pred in preds:
+        items.append(pred[idx])
+
+    return items
+
+
+def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
+    """
+    Generates a DataFrame comparing prediction results for source and icon
+    image classes, and calculates similarity metrics based on top predictions.
+
+    Args:
+        results (dict): A dictionary containing prediction results for multiple files.
+            Keys represent file names and values contain predictions for source and
+            icon, with each being a list of tuples (class_label, probability).
+        top (int): The number of top predictions to consider for calculating
+            similarity metrics.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the following columns:
+            - FILE: List of file names processed from the input dictionary.
+            - SIM_CLASSES: Number of similar classes between source and icon for each file.
+            - SIM_CLASSES_PERC: Percentage of similar classes based on the top predictions.
+            - SIM_BEST_CLASS: Binary indicator if the top class matches between
+              source and icon.
+    """
+    # Initialize lists to store comparison metrics
     file_names = []
     similar_classes = []
     similar_classes_percentage = []
     best_class_eq = []
 
+    # Process each file in results
     for file, preds in results.items():
         file_names.append(file)
 
+        # Extract prediction data for source and icon
         src_preds = preds[SOURCE][0]
         icn_preds = preds[ICON][0]
 
+        # Extract class labels and probabilities
         src_classes = extract_item_from_preds(src_preds, 1)
         icn_classes = extract_item_from_preds(icn_preds, 1)
-
         src_probs = extract_item_from_preds(src_preds, 2)
         icn_probs = extract_item_from_preds(icn_preds, 2)
 
+        # Calculate similarity metrics
         similar_classes_count = len(set(src_classes) & set(icn_classes))
-
         similar_classes.append(similar_classes_count)
         similar_classes_percentage.append(float(similar_classes_count / top) * 100)
 
-        best_class_eq.append(int(src_classes[0] == icn_classes[0]))
+        # Check if top class matches
+        best_class_eq.append(float(src_classes[0] == icn_classes[0]) * 100)
 
-    return pd.DataFrame({FILE: file_names, SIM_CLASSES: similar_classes, SIM_CLASSES_PERC: similar_classes_percentage,
+
+    return pd.DataFrame({FILE: file_names,
+                         SIM_CLASSES: similar_classes,
+                         SIM_CLASSES_PERC: similar_classes_percentage,
                          SIM_BEST_CLASS: best_class_eq})
 
 
-def load_result_paths(depth: int, classifier_name: str) -> ResultPaths:
+def _load_result_paths(results_folder: Path, depth: Depth, classifier_name: str) -> ResultPaths:
     """
-    Generate paths for regular and summary results for a specific classifier and depth.
+    Helper function to generate paths for regular and summary results for a specific classifier and depth.
 
     Args:
+        results_folder: Folder you specified containing results
         depth: The depth parameter used in the classification
         classifier_name: Name of the classifier
 
     Returns:
         ResultPaths object containing paths to regular and summary results
     """
-    base_path = Path('results') / f'depth_{depth}'
-    regular_path = base_path / f"{classifier_name}-depth_{depth}.csv"
-    summary_path = base_path / f"{classifier_name}-summary-depth_{depth}.csv"
+    base_path = results_folder / f'depth-{depth}'
+    regular_path = base_path / f"{classifier_name}-depth-{depth}.csv"
+    summary_path = base_path / f"{classifier_name}-summary-depth-{depth}.csv"
 
     return ResultPaths(regular=regular_path, summary=summary_path)
 
 
-def load_summary_results(depth: int, classifier_name: str, describe: bool = False) -> Optional[pd.DataFrame]:
+def load_summary_results(results_folder: Path,
+                         classifier_name: str,
+                         depth: int,
+                         describe: bool = False
+                         ) -> Optional[pd.DataFrame]:
     """
-    Load summary results for specified depth and classifier.
+    Load summary results for specified individual depth and classifier.
 
     Args:
-        depth: The depth parameter used in the classification
-        classifier_name: Name of the classifier
-        describe: If True, prints details about the summary results
+        results_folder (Path): Folder you specified containing results
+        depth (int): The depth parameter used in the classification
+        classifier_name (str): Name of the classifier
+        describe (bool): If True, prints details about the summary results
 
     Returns:
         DataFrame containing the summary results
     """
+    validate_input_folder(results_folder, ftype='result')
+    if not isinstance(describe, bool):
+        logging.warning("Describe parameter is not a boolean. Defaulting to False")
+        describe = False
+    if not isinstance(depth, int):
+        logging.warning("Depth parameter is not an integer. Please check your input. \nTrying to load summary results for depth 3.")
+        depth = 3
+    if not isinstance(classifier_name, str):
+        logging.error("Classifier name is not a string. You should specify the classifier name from the dict of classifiers. \nExiting the program.")
+        # raise SystemExit(1)
 
     try:
-        paths = load_result_paths(depth, classifier_name)
+        paths = _load_result_paths(results_folder, depth, classifier_name)
         summary_df = pd.read_csv(paths.summary)
 
-        if describe:  # Only print details if describe is True
+        if describe:
             print(f"\nSummary for {classifier_name} at depth {depth}:")
             print("Shape:", summary_df.shape)
             print("Columns:", summary_df.columns.tolist())
             print("First few rows:")
             summary_df.head()
         return summary_df
+    except FileNotFoundError:
+        logging.exception(f"`load_summary_results`"
+                          f"No summary results found for {classifier_name} at depth {depth}",
+                          exc_info=True,
+                          stack_info=True)
+        # return {}
 
-    except Exception as e:
-        print(f"Error loading summary: {e}")
-        return None
 
-def compare_summaries(classifier_names: List[str], depths: List[int], target_value: str = "mean") -> pd.DataFrame:
+def compare_summaries(results_folder: Path,
+                      classifier_names: List[str],
+                      depths: Depth,
+                      target_stat: str = "mean"
+                      ) -> pd.DataFrame:
     """
-    Compare summary results across multiple classifiers and depths.
+    Compares summary results across multiple classifiers and depths.
 
     Args:
+        results_folder(Path): Folder you specified containing results
         classifier_names (List[str]): List of classifier names to compare.
         depths (List[int]): List of depth values to compare.
-        target_value (str, optional): Target value to extract from summary results. Defaults to "mean".
+        target_stat (str, optional): Target value to extract from summary results. Defaults to "mean".
 
     Returns:
         pd.DataFrame: DataFrame containing mean values for each classifier-depth combination.
     """
+    depths = normalize_depth(depths)
+    if not isinstance(target_stat, str):
+        logging.warning("Target value is not a string. Defaulting to 'mean'")
+        target_stat = "mean"
+
     data_list = []
 
     for classifier, depth in product(classifier_names, depths):
-        summary_df = load_summary_results(depth, classifier)
+        summary_df = load_summary_results(results_folder, classifier, depth)
         if summary_df is not None:
             try:
-                target_values = summary_df.set_index(summary_df.columns[0]).loc[target_value]
+                target_values = summary_df.set_index(summary_df.columns[0]).loc[target_stat]
 
                 data_list.append({
                     "Classifier": classifier,
@@ -131,59 +200,35 @@ def compare_summaries(classifier_names: List[str], depths: List[int], target_val
                     SIM_BEST_CLASS: target_values[SIM_BEST_CLASS]
                 })
             except KeyError:
-                print(f"Skipping {classifier} at depth {depth}: 'mean' row not found.")
+                print(f"Skipping {classifier} at depth {depth}: {target_stat} row not found.")
 
     return pd.DataFrame(data_list)
 
 
-def visualize_comparison(comparison_data: pd.DataFrame, metric: str, title: str = None, figsize=(12, 6)) -> None:
+def extract_from_comparison(comparison_data: 'pd.DataFrame', metric: str) -> Tuple[List[str], List]:
     """
-    Visualizes the comparison of classification performance across depths and classifiers using a heatmap.
+    Extracts specified metric data and classifier names from a given comparison DataFrame.
+
+    This function checks if the provided metric exists in the columns of the given DataFrame.
+    If the metric is present, it retrieves the values of the metric as well as the
+    classifier names.
 
     Args:
-        comparison_data (pd.DataFrame): DataFrame with values for different classifiers and depths.
-        metric (str): The metric to visualize (e.g., 'SIM_CLASSES', 'SIM_CLASSES_PERC', 'SIM_BEST_CLASS').
-        title (str, optional): Title for the plot.
-        figsize (tuple, optional): Figure size.
+        comparison_data (pd.DataFrame): A DataFrame containing comparison data, including
+            metrics and classifier names.
+        metric (str): The name of the metric to extract from the comparison data.
 
     Returns:
-        None
+        Tuple[List[str], List]: A tuple containing a list of classifier names and a list
+            of metric values.
 
     Raises:
-        ValueError: If comparison_data is empty or metric is not found in columns.
-
+        ValueError: If the specified metric is not found in the DataFrame columns.
     """
-
-    if comparison_data.empty:
-        raise ValueError("Comparison data cannot be empty")
     if metric not in comparison_data.columns:
-        raise ValueError(f"Metric '{metric}' not found in comparison data columns")
-    if not all(x > 0 for x in figsize):
-        raise ValueError("Figure size dimensions must be positive")
+        raise ValueError(f"Metric '{metric}' not found in comparison data.")
 
+    # Get the classifier names (from the 'Classifier' column)
+    names = comparison_data['Classifier'].tolist()
 
-    # Pivot the data so that classifiers are rows and depths are columns
-    heatmap_data = comparison_data.pivot(index= "Classifier", columns="Depth", values=metric)
-
-    plt.figure(figsize=figsize)
-
-    ax = sns.heatmap(heatmap_data,
-                annot=True,
-                cmap="viridis",
-                fmt=".2f",
-                linewidths=0.5,
-                cbar=True,
-                # cbar_kws={"label": metric}  # Label the color bar with the metric name
-                )
-
-    # Hide the 'Classifier' axis label
-    ax.set_ylabel("")
-    ax.set_xlabel("Depth")
-
-    if title:
-        plt.title(title)
-    else:
-        plt.title(f"{metric}")
-
-    plt.tight_layout()
-    plt.show()
+    return names, comparison_data[metric].tolist()

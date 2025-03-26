@@ -14,3 +14,5 @@ FILE = 'file'
 SIM_CLASSES = 'similar classes (count)'
 SIM_CLASSES_PERC = 'similar classes (%)'
 SIM_BEST_CLASS = 'similar best class'
+
+MAX_INFO_SAMPLE_SIZE = 50

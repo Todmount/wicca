@@ -87,7 +87,8 @@ def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
         similar_classes_percentage.append(float(similar_classes_count / top) * 100)
 
         # Check if top class matches
-        best_class_eq.append(int(src_classes[0] == icn_classes[0]))
+        best_class_eq.append(float(src_classes[0] == icn_classes[0]) * 100)
+
 
     return pd.DataFrame({FILE: file_names,
                          SIM_CLASSES: similar_classes,
@@ -140,7 +141,7 @@ def load_summary_results(results_folder: Path,
         depth = 3
     if not isinstance(classifier_name, str):
         logging.error("Classifier name is not a string. You should specify the classifier name from the dict of classifiers. \nExiting the program.")
-        raise SystemExit(1)
+        # raise SystemExit(1)
 
     try:
         paths = _load_result_paths(results_folder, depth, classifier_name)
@@ -186,7 +187,7 @@ def compare_summaries(results_folder: Path,
     data_list = []
 
     for classifier, depth in product(classifier_names, depths):
-        summary_df = load_summary_results(results_folder, depth, classifier)
+        summary_df = load_summary_results(results_folder, classifier, depth)
         if summary_df is not None:
             try:
                 target_values = summary_df.set_index(summary_df.columns[0]).loc[target_stat]

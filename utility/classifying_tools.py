@@ -5,7 +5,7 @@ import random
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Callable, List, Optional, Tuple, Union
+from typing import Any, Dict, Callable, List, Optional, Tuple, Union, Iterable
 
 import cv2
 import numpy as np
@@ -21,18 +21,17 @@ if 'ipykernel' in sys.modules:
 else:
     from tqdm import tqdm
 
-# Logging message formatting
+
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 # logging.getLogger().setLevel(logging.INFO)
+bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Type aliases
 ModelClass = Callable
 ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
 ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
 Depth = Union[int, Tuple[int, ...], List[int], range]
-
-# Value for tqdm bar
-bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
 
 
 def load_single_model(model_class,
@@ -77,7 +76,6 @@ def load_models(models: ModelsDict) -> Dict[str, Any]:
     Returns:
         Dictionary mapping model names to loaded classifier instances
     """
-    start = time.time()
     classifiers_dict = {}
 
     with tqdm(models.items(), desc="Loading classifiers", bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]') as pbar:
@@ -91,35 +89,7 @@ def load_models(models: ModelsDict) -> Dict[str, Any]:
 
             classifiers_dict[name] = load_single_model(model_class, **kwargs)
 
-        end = time.time()
-        # print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
         return classifiers_dict
-
-
-def get_prediction(image: np.ndarray,
-                   classifier: dict,
-                   top: int = 5
-                   ) -> list:
-    """
-      Returns top predictions for the given image using the specified classifier
-
-      Parameters:
-          image (numpy.ndarray): The loaded image to be classified
-          classifier (dict): image classifier
-          top (int): number of top predicted classes
-
-      Returns:
-          predictions for the image
-    """
-    model = classifier[MODEL]
-    preprocess_input = classifier[PRE_INP]
-    decode_predictions = classifier[DEC_PRED]
-
-    x = np.expand_dims(image, axis=0)
-    x = preprocess_input(x)
-    preds = model.predict(x)
-
-    return decode_predictions(preds, top=top)
 
 
 def normalize_depth(depth: Depth):
@@ -286,7 +256,9 @@ class ClassifierProcessor:
                  top_classes: int,
                  result_manager,
                  results_folder: Union[str, Path] = RESULTS_FOLDER,
-                 log_info: bool = True):
+                 log_info: bool = True,
+                 parallel: int = None,
+                 batch_size: int = 25):
         """
         Initializes an instance of a class and validates input parameters to ensure they
         comply with expected types and values. Handles potential issues with the `depth`
@@ -302,6 +274,8 @@ class ClassifierProcessor:
             results_folder (Union[str, Path]): Directory for storing results; falls back to
                 a default path if the provided value is invalid.
             log_info (bool): Controls whether to log information about the initialized instance.
+            parallel (int): Controls the number of parallel threads to use for processing. Defaults to unlimited.
+            batch_size (int): Controls the number of images to process in each batch. Defaults to 25.
         """
         self.path = validate_input_folder(data_folder)
         self.coder = wavelet_coder
@@ -316,6 +290,8 @@ class ClassifierProcessor:
         self.results_folder = validate_output_folder(results_folder)
         self.rsltmgr = result_manager
         self._log_init_info() if log_info else None
+        self.parallel = parallel
+        self.batch_size = batch_size
 
     def _log_init_info(self):
         """Logs information about the initialized instance"""
@@ -420,6 +396,59 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
         summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
+    def _get_preds(self, images: np.ndarray, classifier: Dict[str, Any]) -> list:
+        """
+        Returns predictions for a batch of images using the specified classifier.
+
+        Parameters:
+            images (numpy.ndarray): Batch of images with shape (batch_size, height, width, channels)
+            classifier (dict): Image classifier dictionary
+
+        Returns:
+            List of decoded predictions for each image
+        """
+        model = classifier[MODEL]
+        preprocess_input = classifier[PRE_INP]
+        decode_predictions = classifier[DEC_PRED]
+
+        # Preprocess the batch
+        preprocessed_images = preprocess_input(images)
+
+        # Get raw predictions
+        preds = model.predict(preprocessed_images, verbose=0)
+
+        # Decode and return predictions for each image in the batch
+        return [decode_predictions(preds[i:i + 1], top=self.top) for i in range(len(images))]
+
+    def _get_img_batch(self, file_paths: Iterable, shape: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Prepares batches of images and their corresponding icons.
+
+        Parameters:
+            file_paths: List of paths to image files
+            shape: Target shape for resizing
+
+        Returns:
+            Tuple of (batch_images, batch_icons)
+        """
+
+        batch_images = []
+        batch_icons = []
+
+        for path in file_paths:
+            image = load_image(path)
+
+            # Resize image
+            resized = cv2.resize(image, shape, interpolation=self.interpolation)
+
+            # Generate icon
+            icon = self.coder.get_small_copy(image, self.depth)
+            resized_icon = cv2.resize(icon, shape, interpolation=self.interpolation)
+
+            batch_images.append(resized)
+            batch_icons.append(resized_icon)
+
+        return np.stack(batch_images), np.stack(batch_icons)
 
     def _classify(self, classifier: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -432,22 +461,23 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
             predictions for each image in the folder
         """
         dir_list = os.listdir(self.path)
+        results = {}
 
-        results = dict()
+        # Process images in smaller batches to manage memory
+        for i in range(0, len(dir_list), self.batch_size):
+            batch_files = dir_list[i:i + self.batch_size]
+            file_paths = [self.path / file_name for file_name in batch_files]
 
-        for file_name in dir_list:
-            image = load_image(self.path / file_name)
+            batch_images, batch_icons = self._get_img_batch(file_paths, classifier[SHAPE])
 
-            resized = cv2.resize(image, classifier[SHAPE], interpolation=self.interpolation)
+            img_preds = self._get_preds(batch_images, classifier)
+            icon_preds = self._get_preds(batch_icons, classifier)
 
-            resized_predictions = get_prediction(resized, classifier)
-
-            icon = self.coder.get_small_copy(image, self.depth)
-            resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=self.interpolation)
-
-            icon_predictions = get_prediction(resized_icon, classifier, self.top)
-
-            results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
+            for file_name, img_pred, icon_pred in zip(batch_files, img_preds, icon_preds):
+                results[file_name] = {
+                    SOURCE: img_pred,
+                    ICON: icon_pred
+                }
 
         return results
 
@@ -506,7 +536,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 in case of exceptions such as TimeoutError or ValueError.
         """
         results = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel) as executor:
             # Submit all tasks
             futures = {}
             for key, value in classifiers.items():
@@ -527,7 +557,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 except Exception as e:
                     logging.warning(f"Error processing classifier {key}: {str(e)}")
                     # raise e
-        # print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
+        print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
         return results
 
     def _single_classifier(self, name: str,
@@ -623,6 +653,8 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         Raises:
             Exception: If attempting to process a single classifier by mistake .
         """
+        results = {}
+        start_time = time.time()
 
         # Handle a single classifier
         if MODEL in classifiers:
@@ -635,9 +667,6 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
             raise Exception("Big Brother is watching you...\n"
                             "If you want to proceed try another timeout\n")
 
-        results = {}
-
-        start_time = time.time()
         for depth in self.depth:
             self.depth = depth
             if isinstance(self.depth, int) and self.depth > 0:
@@ -651,10 +680,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 print(f"Depth '{depth}' not valid. Skipping...\n")
 
         end_time = time.time()
-        logging.info(f"Total processing time: {int(end_time - start_time)} seconds")  # for debug
+        logging.info(f"Total processing time (log): {int(end_time - start_time)} seconds")  # for debug
 
-        # total_time = format_proc_time(start_time, end_time)
-        # print(f"Total processing time: {total_time}")  # for user
-        # You can uncomment this in case you want to see resulting dict for debugging
-        # Be aware, that output will become cumbersome
-        # return results
+        total_time = format_proc_time(start_time, end_time)
+        print(f"Total processing time: {total_time}")  # for user

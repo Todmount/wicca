@@ -2,15 +2,13 @@ import logging
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
 from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
 from utility.classifying_tools import normalize_depth, validate_input_folder
-
-# Type aliases
-Depth = Union[int, Tuple[int, ...], List[int], range]
+from utility.data_loader import Depth
 
 
 @dataclass

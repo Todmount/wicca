@@ -203,7 +203,7 @@ def visualize_comparison(comparison_data: 'pd.DataFrame', metric: str, title: st
     plt.show()
 
 
-def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -> None:
+def plot_metric_radar(names, metric, title: str = None, min_value: int = None, max_value: int = 100) -> None:
     fig = go.Figure(data=go.Scatterpolar(
         r=metric,
         theta=names,
@@ -225,7 +225,7 @@ def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[minimum, max(metric)],
+                range=[minimum, max_value],
                 angle=360,
                 tickangle=0
             ),

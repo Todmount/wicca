@@ -5,91 +5,28 @@ import random
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Callable, List, Optional, Tuple, Union, Iterable
+from typing import Any, Dict, Optional, Tuple, Union, Iterable
 
 import cv2
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 from functools import wraps
+import tensorflow as tf
 
-from utility.data_loader import load_image
+from utility.data_loader import load_image, Depth
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
 
-if 'ipykernel' in sys.modules:
-    from IPython.display import display, Markdown
-    from tqdm.notebook import tqdm
-else:
-    from tqdm import tqdm
-
-
+# Basic configs
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 # logging.getLogger().setLevel(logging.INFO)
 bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Type aliases
-ModelClass = Callable
-ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
-ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
-Depth = Union[int, Tuple[int, ...], List[int], range]
 
-
-def load_single_model(model_class,
-                      shape: Tuple[int, int] = (224, 224),
-                      weights: str = 'imagenet'
-                      ) -> Optional[dict]:
-    """
-    Load a classifier model with error handling.
-
-    Parameters:
-        model_class: Model class to instantiate
-        shape: Input shape tuple (height, width)
-        weights: Pre-trained weights to use, defaults to 'imagenet'
-
-    Returns:
-        Dictionary containing model and its associated functions, or None if loading fails
-    """
-    try:
-        # Get the module containing the model function
-        module = sys.modules[model_class.__module__]
-
-        return {
-            MODEL: model_class(weights=weights),
-            PRE_INP: getattr(module, 'preprocess_input'),
-            DEC_PRED: getattr(module, 'decode_predictions'),
-            SHAPE: shape
-        }
-    except Exception as e:
-        logging.error(f"Error loading: {str(e)}")
-        return None
-
-
-def load_models(models: ModelsDict) -> Dict[str, Any]:
-    """
-    Load multiple image classification models with progress tracking.
-
-    Args:
-        models: Dictionary mapping model names to either:
-               - a model class, or
-               - a tuple of (model_class, config_dict)
-
-    Returns:
-        Dictionary mapping model names to loaded classifier instances
-    """
-    classifiers_dict = {}
-
-    with tqdm(models.items(), desc="Loading classifiers", bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]') as pbar:
-        for name, model_info in pbar:
-            # Check if this is a tuple (model with config) or just a model class
-            if isinstance(model_info, tuple):
-                model_class, kwargs = model_info
-            else:
-                model_class = model_info
-                kwargs = {}
-
-            classifiers_dict[name] = load_single_model(model_class, **kwargs)
-
-        return classifiers_dict
+def isJupyter():
+    "Check if the code is running in the jupyter notebook."
+    return True if 'ipykernel' in sys.modules else False
 
 
 def normalize_depth(depth: Depth):
@@ -329,7 +266,7 @@ class ClassifierProcessor:
                     width.append(img.shape[1])
                     height.append(img.shape[0])
                 except Exception as e:
-                    logging.warning(f"Error reading image {img_path}: {e}")
+                    logging.warning(f"Unexpected error reading image {img_path}: {e} \nSkipping... \n")
                     continue
 
             if width and height:
@@ -347,7 +284,8 @@ class ClassifierProcessor:
                     res_info = f"{(int(mean_resolution))} pixels"
 
             # Use a cleaner output approach for Jupyter
-            if 'ipykernel' in sys.modules:
+            if isJupyter():
+                from IPython.display import display, Markdown
                 summary = f"""
 #### Image Processing Configuration
 Note: For image stats was taken a sample of {sample_size} random images.
@@ -396,6 +334,11 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
         summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
+    @tf.function(reduce_retracing=True, experimental_relax_shapes=True)
+    def _model_predict(self, model, preprocessed_images):
+        """Dedicated function for model inference with retracing reduction."""
+        return model(preprocessed_images)
+
     def _get_preds(self, images: np.ndarray, classifier: Dict[str, Any]) -> list:
         """
         Returns predictions for a batch of images using the specified classifier.
@@ -413,12 +356,15 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
         # Preprocess the batch
         preprocessed_images = preprocess_input(images)
+        preprocessed_images = tf.cast(preprocessed_images, tf.float32)
 
         # Get raw predictions
-        preds = model.predict(preprocessed_images, verbose=0)
+        # preds = model.predict(preprocessed_images, verbose=0)
+        preds = self._model_predict(model, preprocessed_images)
+        preds_np = preds.numpy()
 
         # Decode and return predictions for each image in the batch
-        return [decode_predictions(preds[i:i + 1], top=self.top) for i in range(len(images))]
+        return [decode_predictions(preds_np[i:i + 1], top=self.top) for i in range(len(images))]
 
     def _get_img_batch(self, file_paths: Iterable, shape: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -438,10 +384,8 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         for path in file_paths:
             image = load_image(path)
 
-            # Resize image
             resized = cv2.resize(image, shape, interpolation=self.interpolation)
 
-            # Generate icon
             icon = self.coder.get_small_copy(image, self.depth)
             resized_icon = cv2.resize(icon, shape, interpolation=self.interpolation)
 
@@ -537,27 +481,29 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         """
         results = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel) as executor:
-            # Submit all tasks
-            futures = {}
+            # Create a dictionary mapping futures to their keys for identification
+            future_to_key = {}
             for key, value in classifiers.items():
                 future = executor.submit(self._process_core, (key, value))
-                futures[key] = future
+                future_to_key[future] = key
 
-            # Process results with timeout
-            for key, future in tqdm(futures.items(), desc=f"Processing depth {self.depth}", bar_format=bar_format):
+            # Process results as they complete
+            with tqdm(total=len(future_to_key), desc=f"Processing depth {self.depth}",
+                      bar_format=bar_format, mininterval=1) as pbar:
                 try:
-                    # This will wait up to timeout seconds for this specific classifier
-                    result = future.result(timeout=timeout)
-                    results[key] = result
-                    # print(f"Classifier {key} processed successfully")
+                    # Process futures as they complete with timeout for the entire process
+                    for future in concurrent.futures.as_completed(future_to_key.keys(), timeout=timeout):
+                        key = future_to_key[future]
+                        try:
+                            result = future.result()
+                            results[key] = result
+                        except Exception as exc:
+                            logging.warning(f"Classifier {key} generated an exception: {exc}")
+                        finally:
+                            pbar.update(1)
                 except concurrent.futures.TimeoutError:
-                    logging.warning(f"Classifier {key} timed out after {timeout} seconds. Skipping...")
-                    # Cancel the future if possible (may not work if already running)
-                    future.cancel()  # don't work as expected
-                except Exception as e:
-                    logging.warning(f"Error processing classifier {key}: {str(e)}")
-                    # raise e
-        print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
+                    logging.warning(f"Overall processing timed out after {timeout} seconds")
+
         return results
 
     def _single_classifier(self, name: str,
@@ -607,8 +553,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         explains common errors.
 
         Returns:
-        --------
-        The result from process_single_classifier or None if an error occurs
+            The result from process_single_classifier or None if an error occurs
         """
         try:
             return self._single_classifier(*args, **kwargs)

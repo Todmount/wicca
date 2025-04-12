@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Dict, Any, Callable, Union, List
 
 from tqdm.auto import tqdm
 
+from utility.validation import validate_image
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE
 
 # Type aliases
@@ -14,31 +15,6 @@ ModelClass = Callable
 ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
 ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
 Depth = Union[int, Tuple[int, ...], List[int], range]
-
-
-def validate_image(image: np.ndarray) -> None:
-    """
-    Validates the input image by checking its existence, dimensions, type, and pixel value range.
-    Raises an error if any validation fails.
-
-    Args:
-        image (np.ndarray): The input image array to validate.
-
-    Raises:
-        ValueError: If the input image is None.
-        ValueError: If the input image has no dimensions or is empty.
-        ValueError: If the input image is not in RGB format (does not have 3 channels).
-        ValueError: If the input image type is not np.uint8.
-        ValueError: If the input image pixel values exceed the range of 0 to 255.
-    """
-    if image is None:
-        raise ValueError("Image didn't found. Please check your input.")
-    if image.shape[0] == 0 or image.shape[1] == 0 or image.size == 0:
-        raise ValueError("Image is empty")
-    if image.dtype != np.uint8:
-        raise ValueError("Image must be of type uint8")
-    if np.max(image) > 255:
-        raise ValueError("Image pixel values must be between 0 and 255")
 
 
 def load_image(file_path: str) -> Optional[np.ndarray]:

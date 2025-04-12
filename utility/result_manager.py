@@ -7,7 +7,8 @@ from typing import List, Optional, Tuple
 import pandas as pd
 
 from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
-from utility.classifying_tools import normalize_depth, validate_input_folder
+from utility.validation import validate_input_folder
+from utility.normalization import normalize_depth
 from utility.data_loader import Depth
 
 

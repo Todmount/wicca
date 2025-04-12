@@ -5,7 +5,7 @@ import random
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union, Iterable
+from typing import Any, Dict, Tuple, Union, Iterable
 
 import cv2
 import numpy as np
@@ -16,6 +16,8 @@ import tensorflow as tf
 
 from utility.data_loader import load_image, Depth
 from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
+from utility.normalization import normalize_depth
+from utility.validation import validate_input_folder, validate_output_folder
 
 # Basic configs
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -24,44 +26,9 @@ bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
-def isJupyter():
-    "Check if the code is running in the jupyter notebook."
+def is_jupyter():
+    """Check if the code is running in the jupyter notebook."""
     return True if 'ipykernel' in sys.modules else False
-
-
-def normalize_depth(depth: Depth):
-    """
-    Normalizes the given depth input.
-
-    The function ensures the provided `depth` is converted into a uniform tuple of
-    integers, ensuring compatibility and usability in further operations. It raises
-    errors if the input does not conform to the expected types and conditions.
-
-    Args:
-        depth: The depth input to be normalized. It can be an integer greater than
-            0, a tuple, a list, or a range. A `None` value and invalid types will
-            raise respective errors.
-
-    Returns:
-        A tuple of integers representing the normalized depth.
-
-    Raises:
-        ValueError: If depth is not provided (None).
-        ValueError: If depth is not a positive integer, tuple, list, or range.
-        ValueError: If any element in the depth is not an integer.
-    """
-    if depth is None:
-        raise ValueError("Depth must be provided")
-    if isinstance(depth, int) and depth > 0:
-        depth = (depth,)
-    if isinstance(depth, (tuple, list, range)):
-        depth = tuple(depth)
-    else:
-        raise ValueError("Depth must be a positive integer, tuple, list, or range")
-    if all(isinstance(x, int) and x > 0 for x in depth):
-        return depth
-    else:
-        raise ValueError("All depths must be integers greater than 0")
 
 
 def preserve_depth(func):
@@ -111,69 +78,6 @@ def format_proc_time(start: float, end: float) -> str:
     time_str = " ".join(time_parts)
 
     return time_str
-
-
-def _normalize_folder(folder: Union[str, Path]) -> Path:
-    """Normalizes a folder path"""
-    if not isinstance(folder, (Path, str)):
-        msg = f"Invalid input type: {type(folder)}. Expected str or Path."
-        logging.error(msg)
-        raise TypeError(msg)
-    return Path(folder)
-
-
-def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path:
-    """Handles folder-related errors"""
-    folder = _normalize_folder(folder)
-    if not folder.exists() and ftype == 'data':
-        msg = f"Provided {ftype} folder: '{folder}' does not exist."
-        logging.error(msg)
-        raise FileNotFoundError(msg)
-    elif not folder.exists():
-        msg = f"Provided {ftype} folder: '{folder}' does not exist.\nCreating folder..."
-        logging.warning(msg)
-        folder.mkdir(parents=True, exist_ok=True)
-    if not folder.is_dir():
-        msg = f"Provided {ftype} folder: '{folder}' is not a directory."
-        logging.error(msg)
-        raise NotADirectoryError(msg)
-    try:
-        # Test access permissions by listing contents
-        next(folder.iterdir(), None)
-    except PermissionError:
-        msg = f"Provided {ftype} folder: '{folder}' is not accessible."
-        logging.error(msg)
-        raise PermissionError(msg)
-
-    return folder
-
-
-def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Optional[Path]:
-    """Validates a data folder path"""
-    folder = _handle_folder_errors(folder, ftype)
-
-    # Check if folder is empty
-    if not any(folder.iterdir()):
-        msg = f"The folder '{folder}' is empty. Please provide a non-empty folder. \nExiting... \n"
-        logging.error(msg)
-        raise ValueError(msg)
-
-    return folder
-
-
-def validate_output_folder(folder: Union[str, Path], ftype: str = 'result') -> Optional[Path]:
-    """Validates results folder path"""
-    folder = _handle_folder_errors(folder, ftype)
-
-    # Check if folder is not empty and prompt user
-    if any(folder.iterdir()):
-        user_input = input(
-            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? ([y]/n): ").strip().lower()
-        if user_input in {"n", "no", "not", "-", "nuh"}:
-            logging.info("User chose not to overwrite existing results. \nExiting...")
-            sys.exit(0)
-
-    return folder
 
 
 class ClassifierProcessor:
@@ -284,7 +188,7 @@ class ClassifierProcessor:
                     res_info = f"{(int(mean_resolution))} pixels"
 
             # Use a cleaner output approach for Jupyter
-            if isJupyter():
+            if is_jupyter():
                 from IPython.display import display, Markdown
                 summary = f"""
 #### Image Processing Configuration
@@ -334,7 +238,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
         summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
-    @tf.function(reduce_retracing=True, experimental_relax_shapes=True)
+    @tf.function(reduce_retracing=True)
     def _model_predict(self, model, preprocessed_images):
         """Dedicated function for model inference with retracing reduction."""
         return model(preprocessed_images)

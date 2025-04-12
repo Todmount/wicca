@@ -7,12 +7,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Tuple, Union, List, TYPE_CHECKING
 
-from utility.classifying_tools import normalize_depth
-from utility.data_loader import validate_image
+from utility.normalization import normalize_depth
+from utility.validation import validate_image
 
 if TYPE_CHECKING:
     import pandas as pd
 
+# Aliases
 Depth = Union[int, Tuple[int, ...], List[int], range]
 
 

@@ -3,21 +3,16 @@ import sys
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, Dict, Any, Callable, Union, List
+from typing import Any
 
 from tqdm.auto import tqdm
 
-from utility.validation import validate_image
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE
-
-# Type aliases
-ModelClass = Callable
-ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
-ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
-Depth = Union[int, Tuple[int, ...], List[int], range]
+from wicca.validation import validate_image
+from wicca.config.constants import MODEL, PRE_INP, DEC_PRED, SHAPE
+from wicca.config.aliases import ModelsDict
 
 
-def load_image(file_path: str) -> Optional[np.ndarray]:
+def load_image(file_path: str) -> np.ndarray | None:
     """
     Loads an image from a file path and converts it to RGB format if it is a color image.
 
@@ -107,13 +102,13 @@ def get_padded_copy(image: np.ndarray, ratio: int, border_type: int = cv2.BORDER
 
 
 def load_single_model(model_class,
-                      shape: Tuple[int, int] = (224, 224),
+                      shape: tuple[int, int] = (224, 224),
                       weights: str = 'imagenet'
-                      ) -> Optional[dict]:
+                      ) -> dict | None:
     """
     Load a classifier model with error handling.
 
-    Parameters:
+    Args:
         model_class: Model class to instantiate
         shape: Input shape tuple (height, width)
         weights: Pre-trained weights to use, defaults to 'imagenet'
@@ -136,7 +131,7 @@ def load_single_model(model_class,
         return None
 
 
-def load_models(models: ModelsDict) -> Dict[str, Any]:
+def load_models(models: ModelsDict) -> dict[str, Any]:
     """
     Load multiple image classification models with progress tracking.
 

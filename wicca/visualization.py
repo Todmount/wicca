@@ -5,22 +5,20 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Tuple, Union, List, TYPE_CHECKING
+from typing import TYPE_CHECKING#,Tuple, Union, List
 
-from utility.normalization import normalize_depth
-from utility.validation import validate_image
+from wicca.normalization import normalize_depth
+from wicca.validation import validate_image
+from wicca.config.aliases import Depth
 
 if TYPE_CHECKING:
     import pandas as pd
-
-# Aliases
-Depth = Union[int, Tuple[int, ...], List[int], range]
 
 
 def show_image_vs_icon(image: np.ndarray,
                        depth_value: Depth,
                        coder,
-                       figsize: Tuple[int, int] = None
+                       figsize: tuple[int, int] = None
                        ) -> None:
     """
     Displays a series of images showcasing the original image alongside its transformed
@@ -38,7 +36,6 @@ def show_image_vs_icon(image: np.ndarray,
 
     Raises:
         ValueError: If the `image` parameter is None.
-
     """
     # Validation
     validate_image(image)
@@ -98,7 +95,7 @@ def show_icon_on_image(image: np.ndarray,
                        coder,
                        border_width: int = 1,
                        border_color: tuple = (255, 255, 255),
-                       figsize: Tuple[int, int] = None
+                       figsize: tuple[int, int] = None
                        ) -> None:
     """
     Visualizes the Discrete Wavelet Transform (DWT) of an image by displaying the original image
@@ -169,7 +166,6 @@ def visualize_comparison(comparison_data: 'pd.DataFrame', metric: str, title: st
         ValueError: If `comparison_data` is empty.
         ValueError: If the `metric` is not found in the columns of `comparison_data`.
         ValueError: If any dimension in `figsize` is non-positive.
-
     """
 
     if comparison_data.empty:

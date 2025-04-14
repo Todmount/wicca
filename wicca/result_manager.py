@@ -2,14 +2,13 @@ import logging
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import pandas as pd
 
-from settings.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
-from utility.validation import validate_input_folder
-from utility.normalization import normalize_depth
-from utility.data_loader import Depth
+from wicca.config.constants import SOURCE, ICON, SIM_CLASSES, SIM_CLASSES_PERC, SIM_BEST_CLASS, FILE
+from wicca.validation import validate_input_folder
+from wicca.normalization import normalize_depth
+from wicca.config.aliases import Depth
 
 
 @dataclass
@@ -18,7 +17,7 @@ class ResultPaths:
     summary: Path
 
 
-def extract_item_from_preds(preds: list, idx: int) -> Optional[list]:
+def extract_item_from_preds(preds: list, idx: int) -> list | None:
     """
     Extract specified items from predictions
 
@@ -77,8 +76,9 @@ def get_short_comparison(results: dict, top: int) -> pd.DataFrame:
         # Extract class labels and probabilities
         src_classes = extract_item_from_preds(src_preds, 1)
         icn_classes = extract_item_from_preds(icn_preds, 1)
-        src_probs = extract_item_from_preds(src_preds, 2)
-        icn_probs = extract_item_from_preds(icn_preds, 2)
+        # future feature
+        # src_probs = extract_item_from_preds(src_preds, 2)
+        # icn_probs = extract_item_from_preds(icn_preds, 2)
 
         # Calculate similarity metrics
         similar_classes_count = len(set(src_classes) & set(icn_classes))
@@ -118,7 +118,7 @@ def load_summary_results(results_folder: Path,
                          classifier_name: str,
                          depth: int,
                          describe: bool = False
-                         ) -> Optional[pd.DataFrame]:
+                         ) -> pd.DataFrame | None:
     """
     Load summary results for specified individual depth and classifier.
 
@@ -162,7 +162,7 @@ def load_summary_results(results_folder: Path,
 
 
 def compare_summaries(results_folder: Path,
-                      classifier_names: List[str],
+                      classifier_names: list[str],
                       depths: Depth,
                       target_stat: str = "mean"
                       ) -> pd.DataFrame:
@@ -204,7 +204,8 @@ def compare_summaries(results_folder: Path,
     return pd.DataFrame(data_list)
 
 
-def extract_from_comparison(comparison_data: 'pd.DataFrame', metric: str) -> Tuple[List[str], List]:
+def extract_from_comparison(comparison_data: 'pd.DataFrame', metric: str
+                            ) -> tuple[list[str], list]:
     """
     Extracts specified metric data and classifier names from a given comparison DataFrame.
 

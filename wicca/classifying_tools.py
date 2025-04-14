@@ -5,7 +5,8 @@ import random
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 import cv2
 import numpy as np
@@ -14,16 +15,18 @@ from tqdm.auto import tqdm
 from functools import wraps
 import tensorflow as tf
 
-from utility.data_loader import load_image, Depth
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
-from utility.normalization import normalize_depth
-from utility.validation import validate_input_folder, validate_output_folder
+from wicca.data_loader import load_image
+from wicca.normalization import normalize_depth
+from wicca.validation import validate_input_folder, validate_output_folder
+from wicca.config.aliases import Depth
+from wicca.config.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
 
 # Basic configs
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 # logging.getLogger().setLevel(logging.INFO)
 bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# tf.get_logger().setLevel('ERROR')
 
 
 def is_jupyter():
@@ -32,9 +35,11 @@ def is_jupyter():
 
 
 def preserve_depth(func):
-    """Decorator that preserves the original depth value.
+    """
+    Decorator that preserves the original depth value.
     Saves depth at the start of function and restores it at the end,
-    regardless of any changes made within the function."""
+    regardless of any changes made within the function.
+    """
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -90,13 +95,13 @@ class ClassifierProcessor:
     """
 
     def __init__(self,
-                 data_folder: Union[str, Path],
+                 data_folder: str | Path,
                  wavelet_coder: Any,
                  transform_depth: Depth,
                  interpolation: int,
                  top_classes: int,
                  result_manager,
-                 results_folder: Union[str, Path] = RESULTS_FOLDER,
+                 results_folder: str | Path = RESULTS_FOLDER,
                  log_info: bool = True,
                  parallel: int = None,
                  batch_size: int = 25):
@@ -106,13 +111,13 @@ class ClassifierProcessor:
         parameter by normalizing it and ensures a valid results folder is assigned.
 
         Args:
-            data_folder (Union[str, Path]): The path to the resources or directory.
+            data_folder (str | Path): The path to the resources or directory.
             wavelet_coder (module): Module containing the wavelet processing logic.
             transform_depth (Depth): Provided depth. It can be int, tuple, list, or range. All elements must be positive integers.
             interpolation (int): Configures interpolation level for operations.
             top_classes (int): Limits the number of classes to be compared for each image and icon.
             result_manager (module): Module containing the results management logic.
-            results_folder (Union[str, Path]): Directory for storing results; falls back to
+            results_folder (str | Path): Directory for storing results; falls back to
                 a default path if the provided value is invalid.
             log_info (bool): Controls whether to log information about the initialized instance.
             parallel (int): Controls the number of parallel threads to use for processing. Defaults to unlimited.
@@ -193,7 +198,7 @@ class ClassifierProcessor:
                 summary = f"""
 #### Image Processing Configuration
 Note: For image stats was taken a sample of {sample_size} random images.
-You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.
+You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the config.constants module.
 - **Data folder:** {self.path}
 - **Number of images:** {image_count}
 - **Mean image dimensions:** {imgs_dims}
@@ -207,7 +212,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
             else:
                 # Regular logging for non-Jupyter environments
                 print(f"\nNote: For image stats was taken a sample of {sample_size} random images."
-                      "\nYou may change the max sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.")
+                      "\nYou may change the max sample size [MAX_INFO_SAMPLE_SIZE] in the config.constants module.")
                 print(f"Data folder: {self.path}")
                 print(f"Number of images: {image_count}")
                 print(f"Mean image dimensions: {imgs_dims}")
@@ -216,6 +221,8 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 print(f"Interpolation: {interpolation_name}")
                 print(f"Top classes: {self.top}")
                 print(f"Results folder: {self.results_folder}")
+
+        time.sleep(0.5) # to prevent output overlapping
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
@@ -243,11 +250,11 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         """Dedicated function for model inference with retracing reduction."""
         return model(preprocessed_images)
 
-    def _get_preds(self, images: np.ndarray, classifier: Dict[str, Any]) -> list:
+    def _get_preds(self, images: np.ndarray, classifier: dict[str, Any]) -> list:
         """
         Returns predictions for a batch of images using the specified classifier.
 
-        Parameters:
+        Args:
             images (numpy.ndarray): Batch of images with shape (batch_size, height, width, channels)
             classifier (dict): Image classifier dictionary
 
@@ -270,11 +277,11 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         # Decode and return predictions for each image in the batch
         return [decode_predictions(preds_np[i:i + 1], top=self.top) for i in range(len(images))]
 
-    def _get_img_batch(self, file_paths: Iterable, shape: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_img_batch(self, file_paths: Iterable, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
         """
         Prepares batches of images and their corresponding icons.
 
-        Parameters:
+        Args:
             file_paths: List of paths to image files
             shape: Target shape for resizing
 
@@ -298,12 +305,12 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
         return np.stack(batch_images), np.stack(batch_icons)
 
-    def _classify(self, classifier: Dict[str, Any]) -> Dict[str, Any]:
+    def _classify(self, classifier: dict[str, Any]) -> dict[str, Any]:
         """
         Returns top predictions for the images and their icons.
 
         Args:
-             classifier ( Dict[str, Any]): image classifier
+             classifier (Dict[str, Any]): image classifier
 
         Returns:
             predictions for each image in the folder
@@ -329,7 +336,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
         return results
 
-    def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
+    def _process_core(self, item: tuple[str, dict]) -> tuple[str, pd.DataFrame]:
         """
         Processes a given item using the provided classifier and saves the resulting
         data.
@@ -345,7 +352,6 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         Returns:
             A tuple containing the name of the classifier and the summary dataframe
             generated from the classification results.
-
         """
         name, classifier = item
         res = self._classify(classifier)
@@ -359,7 +365,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
         return name, sum_df
 
-    def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
+    def _parallel_proc(self, classifiers: dict[str, Any], timeout: int = None) -> dict[str, Any] | None:
         """
         Processes multiple classifiers using parallel threads.
 
@@ -411,7 +417,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         return results
 
     def _single_classifier(self, name: str,
-                           classifier_dict: Dict[str, Any],
+                           classifier_dict: dict[str, Any],
                            timeout: int = None
                            ):
         """
@@ -484,7 +490,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
     @preserve_depth
     def process_classifiers(self,
-                            classifiers: Dict[str, Any],
+                            classifiers: dict[str, Any],
                             timeout: int = None
                             ):
         """

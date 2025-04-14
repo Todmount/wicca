@@ -2,14 +2,11 @@ import sys
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Union, Optional, Tuple, List
 
-from utility.normalization import normalize_folder
-
-Depth = Union[int, Tuple[int, ...], List[int], range]
+from wicca.normalization import normalize_folder
 
 
-def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path:
+def _handle_folder_errors(folder: str | Path, ftype: str = 'data') -> Path:
     """Handles folder-related errors"""
     folder = normalize_folder(folder)
     if not folder.exists() and ftype == 'data':
@@ -35,7 +32,7 @@ def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path
     return folder
 
 
-def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Optional[Path]:
+def validate_input_folder(folder: str | Path, ftype: str = 'data') -> Path | None:
     """Validates a data folder path"""
     folder = _handle_folder_errors(folder, ftype)
 
@@ -49,16 +46,16 @@ def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Opti
     return folder
 
 
-def validate_output_folder(folder: Union[str, Path], ftype: str = 'result') -> Optional[Path]:
+def validate_output_folder(folder: str | Path, ftype: str = 'result') -> Path | None:
     """Validates results folder path"""
     folder = _handle_folder_errors(folder, ftype)
 
     # Check if folder is not empty and prompt user
     if any(folder.iterdir()):
         user_input = input(
-            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? ([y]/n): ").strip().lower()
+            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? (Y/n): ").strip().lower()
         if user_input in {"n", "no", "not", "-", "nuh"}:
-            logging.info("User chose not to overwrite existing results. \nExiting...")
+            print("Aborting...")
             sys.exit(0)
 
     return folder
@@ -75,7 +72,6 @@ def validate_image(image: np.ndarray) -> None:
     Raises:
         ValueError: If the input image is None.
         ValueError: If the input image has no dimensions or is empty.
-        ValueError: If the input image is not in RGB format (does not have 3 channels).
         ValueError: If the input image type is not np.uint8.
         ValueError: If the input image pixel values exceed the range of 0 to 255.
     """

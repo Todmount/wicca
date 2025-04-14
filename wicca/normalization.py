@@ -1,10 +1,7 @@
 import logging
 from pathlib import Path
-from typing import Union
-from typing import List, Tuple
 
-# Aliases
-Depth = Union[int, Tuple[int, ...], List[int], range]
+from wicca.config.aliases import Depth
 
 
 def normalize_depth(depth: Depth) -> Depth:
@@ -42,7 +39,7 @@ def normalize_depth(depth: Depth) -> Depth:
         raise ValueError("All depths must be integers greater than 0")
 
 
-def normalize_folder(folder: Union[str, Path]) -> Path:
+def normalize_folder(folder: str | Path) -> Path:
     """Normalizes a folder path"""
     if not isinstance(folder, (Path, str)):
         msg = f"Invalid input type: {type(folder)}. Expected str or Path."

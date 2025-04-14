@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 import cv2
 import numpy as np
 
-from utility.data_loader import get_padded_copy
-from utility.validation import validate_image
+from wicca.data_loader import get_padded_copy
+from wicca.validation import validate_image
 
 
 class WaveletCoder(ABC):

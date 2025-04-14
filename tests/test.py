@@ -1,143 +1,65 @@
 import os
-import cv2
-# from cv2 import cv2
 
-from pathlib import Path
+import cv2
+import pandas as pd
 import tensorflow.keras.applications as apps
 
-import utility.result_manager as rsltmgr
-import utility.visualization as viz
-from utility.data_loader import load_image, load_models
-from utility.wavelet_coder import HaarCoder
-from utility.classifying_tools import ClassifierProcessor
-from settings.constants import *
+from wicca.config.constants import *
+import wicca.result_manager as rmgr
+from wicca.data_loader import load_models
+from wicca.wavelet_coder import HaarCoder
+from wicca.classifying_tools import ClassifierProcessor
 
+# Settings
+pd.set_option('display.float_format', '{:.5f}'.format) # Nice format for dataframes output
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # WARNING. Disabling gpu
+
+standard_shape_models_dict = {
+    'MobileNetV2': apps.mobilenet_v2.MobileNetV2,
+    # 'VGG16': apps.vgg16.VGG16,
+    # 'VGG19': apps.vgg19.VGG19,
+    'ResNet50': apps.resnet50.ResNet50,
+    # 'ResNet101': apps.resnet.ResNet101,
+    # 'DenseNet169': apps.densenet.DenseNet169,
+    # 'DenseNet201': apps.densenet.DenseNet201,
+    # 'NASNetMobile': apps.nasnet.NASNetMobile,
+    'ResNet152': apps.resnet.ResNet152,
+    # 'EfficientNetB0': apps.efficientnet.EfficientNetB0,
+    # 'DenseNet121': apps.densenet.DenseNet121,
+    # 'EfficientNetB1': (apps.efficientnet.EfficientNetB1, {'shape': (240, 240)})
+}
+
+single_model = {
+    "MobileNetV2": apps.mobilenet_v2.MobileNetV2
+}
+
+# classifiers = load_models(models_dict)
+classifiers = load_models(standard_shape_models_dict)
+
+# Depths
+depth = 5
+depth_tuple = (3, 4)
+depth_range = [5,6]
+depth_list = [2, 6]
+depth_tuple_list = [(3, 4), (4, 5), (5, 6)] # would fail
+
+data_folder = PROJECT_ROOT / 'data' / '10test'  # for test purposes
+res_folder = PROJECT_ROOT / 'results' / 'test'
+
+res_folder_nonexist = f'{res_folder}_nonexist'
 
 if __name__ == '__main__':
-    models_to_load = {
-        # Mobile Networks (standard 224×224)
-        'MobileNetV2': apps.mobilenet_v2.MobileNetV2,
-
-        # VGG family (standard 224×224)
-        'VGG16': apps.vgg16.VGG16,
-        'VGG19': apps.vgg19.VGG19,
-
-        # ResNet family (standard 224×224)
-        'ResNet50': apps.resnet50.ResNet50,
-        'ResNet101': apps.resnet.ResNet101,
-        'ResNet152': apps.resnet.ResNet152,
-
-        # DenseNet family (standard 224×224)
-        'DenseNet121': apps.densenet.DenseNet121,
-        'DenseNet169': apps.densenet.DenseNet169,
-        'DenseNet201': apps.densenet.DenseNet201,
-
-        # NasNet family (custom shapes)
-        'NASNetMobile': apps.nasnet.NASNetMobile,  # Uses 224×224
-        'NASNetLarge': (apps.nasnet.NASNetLarge, {'shape': (331, 331)}),
-
-        # Inception family (custom shapes)
-        'InceptionV3': (apps.inception_v3.InceptionV3, {'shape': (299, 299)}),
-        'InceptionResNetV2': (apps.inception_resnet_v2.InceptionResNetV2, {'shape': (299, 299)}),
-
-        # Xception (custom shape)
-        'Xception': (apps.xception.Xception, {'shape': (299, 299)}),
-    }
-
-    models4test = {
-        # VGG family (standard 224×224)
-        # 'VGG16': apps.vgg16.VGG16,
-        'VGG19': apps.vgg19.VGG19,
-        'MobileNetV2': apps.mobilenet_v2.MobileNetV2,
-        'ResNet152': apps.resnet.ResNet152,
-        # 'InceptionResNetV2': (apps.inception_resnet_v2.InceptionResNetV2, {'shape': (299, 299)}),
-        # 'NASNetLarge': (apps.nasnet.NASNetLarge, {'shape': (331, 331)}),
-        'DenseNet121': apps.densenet.DenseNet121,
-    }
-
-    standard_shape_models_dict = {
-        'MobileNetV2': apps.mobilenet_v2.MobileNetV2,
-        'VGG16': apps.vgg16.VGG16,
-        # 'VGG19': apps.vgg19.VGG19,
-        'ResNet50': apps.resnet50.ResNet50,
-        # 'ResNet101': apps.resnet.ResNet101,
-        # 'DenseNet169': apps.densenet.DenseNet169,
-        # 'DenseNet201': apps.densenet.DenseNet201,
-        'NASNetMobile': apps.nasnet.NASNetMobile,
-        # 'ResNet152': apps.resnet.ResNet152,
-        'EfficientNetB0': apps.efficientnet.EfficientNetB0,
-        # 'DenseNet121': apps.densenet.DenseNet121,
-        # 'EfficientNetB1': (apps.efficientnet.EfficientNetB1, {'shape': (240, 240)})
-    }
-
-    # classifiers = load_models(models_to_load) # around 1 minute
-    classifiers = load_models(standard_shape_models_dict)
-
-    data_folder =  PROJECT_ROOT / 'data' / 'orig'
-    # data_folder = PROJECT_ROOT / 'data' / '10test'  # for test purposes
-    res_folder = PROJECT_ROOT / 'results' / 'test'
-
-    res_folder_nonexist = f'{res_folder}_nonexist'
-
-    depths = 5
-    processor = ClassifierProcessor(data_folder=data_folder,
-                                    wavelet_coder=HaarCoder(),  # defines our wavelet
-                                    transform_depth=depths,  # defines the depth of transforming
-                                    top_classes=5,  # defines top classes for comparison
-                                    interpolation=cv2.INTER_AREA,  # ATTENTION
-                                    results_folder=res_folder,
-                                    result_manager=rsltmgr,
-                                    parallel=None, # Which means infinity
-                                    batch_size=30)
-
-    ## must work for all classifiers
-    result_all_depths = processor.process_classifiers(classifiers, timeout=3600) # results for multiple all
-
-    ## must work for single
-    # result_VGG19 = processor.process_single_classifier("VGG19", classifiers["VGG19"], timeout=3601)
-
-    ## must work flawlessly
-    # results = processor.process_classifiers(classifiers["VGG19"])
-
-    ## must work, not typical
-    # result_VGG16 = processor.process_classifiers({"VGG16": classifiers["VGG16"]},timeout = 3601)
-
-    ## must not work
-    # result_MobileNetV2 = processor.process_classifiers(classifiers["MobileNetV2"])
-
-    ## must not work
-    # result_VGG19 = processor.process_single_classifier(classifiers["VGG19"])
-
-    """VISUALIZATION"""
-    ## load image
-    list_dir = [f.name for f in data_folder.iterdir()]
-    idx = list_dir[2]
-    sample = load_image(data_folder / idx)
-
-    # viz.show_image_vs_ic on(sample,depths, coder=HaarCoder())
-    #
-    # viz.show_icon_on_image(sample, depths, border_width=2, border_color=(0, 0, 255), coder=HaarCoder())
-
-    # x = rsltmgr.compare_summaries(res_folder, classifiers, depths)
-
-    comparison = rsltmgr.compare_summaries(res_folder, classifiers, 5, 'mean')
-    names, similar_classes_pct = rsltmgr.extract_from_comparison(comparison, 'similar classes (%)')
-    names, similar_best_class = rsltmgr.extract_from_comparison(comparison, 'similar best class')
-
-    viz.plot_metric_radar(names, similar_classes_pct, 'Top 5 Similarity', min_value=75)
-    viz.plot_metric_radar(names, similar_best_class, 'Top 1 Similarity', min_value=75)
-
-    # viz.plot_compare_metrics(names, similar_classes_pct, similar_best_class)
-
-    # viz.visualize_comparison(x, SIM_CLASSES_PERC, title="Similar classes, % (mean)")
-    # image = Path(path / name)
-
-    # Looking for a way to compare size of source and compressed items
-    # print(f"Source image size: {image.stat().st_size}")
-
-    # yu = rsltmgr.load_summary_results(res_folder, 'MobileNetV2', 5)
-    # print(yu)
-    # print("-" * 80)
-
-    # help(processor)
+    processor = ClassifierProcessor(
+        data_folder=data_folder,  # Directory containing images to process
+        wavelet_coder=HaarCoder(),  # Defines our wavelet
+        transform_depth=depth_range,  # Defines the depth of transforming
+        top_classes=5,  # Defines top classes for comparison
+        interpolation=cv2.INTER_AREA,  # Interpolation method. See https://docs.opencv.org/3.4/da/d54/group__imgproc__transform.html
+        result_manager=rmgr,  # Result manager module
+        results_folder=res_folder,  # Where to save results
+        log_info=True,  # Output related info. Enabled by default
+        parallel=5, # What means infinity
+        batch_size=30 # Size of image batch for classifier
+    )
+    processor.process_classifiers(classifiers, timeout=3600)

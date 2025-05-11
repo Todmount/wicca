@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 from functools import wraps
 import tensorflow as tf
 
+import wicca.result_manager as rsltmgr
 from wicca.data_loader import load_image
 from wicca.normalization import normalize_depth
 from wicca.validation import validate_input_folder, validate_output_folder
@@ -100,7 +101,7 @@ class ClassifierProcessor:
                  transform_depth: Depth,
                  interpolation: int,
                  top_classes: int,
-                 result_manager,
+                 # result_manager,
                  results_folder: str | Path = RESULTS_FOLDER,
                  log_info: bool = True,
                  parallel: int = None,
@@ -134,7 +135,7 @@ class ClassifierProcessor:
             raise ValueError(msg)
         self.interpolation = interpolation
         self.results_folder = validate_output_folder(results_folder)
-        self.rsltmgr = result_manager
+        # self.rsltmgr = result_manager
         self._log_init_info() if log_info else None
         self.parallel = parallel
         self.batch_size = batch_size
@@ -357,8 +358,12 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the config.constants mo
         res = self._classify(classifier)
 
         # Using the rsltmgr module correctly as passed in the constructor
-        res_df = self.rsltmgr.get_short_comparison(res, self.top)
+        res_df = rsltmgr.get_short_comparison(res, self.top)
+        res_df.index.name = "index"
+
         sum_df = res_df.describe()
+        sum_df = sum_df.loc[['mean', 'min', 'max']]  # Keep only these rows
+        sum_df.index.name = "stat"
 
         # Save CSV files inside the "results" folder
         self._save_results(res_df, sum_df, name)

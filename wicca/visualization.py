@@ -228,7 +228,11 @@ def plot_metric_radar(names, metric, title: str = None, min_value: int = None, m
             ),
         ),
         showlegend=False,
-        title=title
+        title=dict(
+            text=title,
+            x=0.5,  # 0.5 for center alignment
+            xanchor='center'
+        )
     )
     fig.show()
 
@@ -249,12 +253,12 @@ def plot_compare_metrics(names, metric1, metric2, xlabel: str = None, ylabel: st
     # Adjust text positioning
     fig.update_traces(textposition='top center', marker_size=12)
     # Add a line for reference
-    fig.add_shape(
-        type="line",
-        x0=min(metric1) * 0.95,
-        y0=min(metric2) * 0.95,
-        x1=max(metric1) * 1.05,
-        y1=max(metric2) * 1.05,
-        line=dict(color="Gray", width=1, dash="dash")
-    )
+    # fig.add_shape(
+    #     type="line",
+    #     x0=min(metric1) * 0.95,
+    #     y0=min(metric2) * 0.95,
+    #     x1=max(metric1) * 1.05,
+    #     y1=max(metric2) * 1.05,
+    #     line=dict(color="Gray", width=1, dash="dash")
+    # )
     fig.show()

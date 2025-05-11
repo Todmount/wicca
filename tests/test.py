@@ -56,9 +56,8 @@ if __name__ == '__main__':
         transform_depth=depth_range,  # Defines the depth of transforming
         top_classes=5,  # Defines top classes for comparison
         interpolation=cv2.INTER_AREA,  # Interpolation method. See https://docs.opencv.org/3.4/da/d54/group__imgproc__transform.html
-        result_manager=rmgr,  # Result manager module
         results_folder=res_folder,  # Where to save results
-        log_info=True,  # Output related info. Enabled by default
+        log_info=True,  # Output-related info. Enabled by default
         parallel=5, # What means infinity
         batch_size=30 # Size of image batch for classifier
     )

@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 import cv2
 import numpy as np
 
-from utility.data_loader import get_padded_copy
-from utility.data_loader import validate_image
+from wicca.data_loader import get_padded_copy
+from wicca.validation import validate_image
 
 
 class WaveletCoder(ABC):
@@ -20,7 +20,6 @@ class WaveletCoder(ABC):
         """
         Resize the image using wavelet transform.
         """
-        # pass
 
 
 class HaarCoder(WaveletCoder):

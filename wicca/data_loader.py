@@ -1,34 +1,18 @@
+import logging
+import sys
+
 import cv2
 import numpy as np
-from typing import Optional
+from typing import Any
+
+from tqdm.auto import tqdm
+
+from wicca.validation import validate_image
+from wicca.config.constants import MODEL, PRE_INP, DEC_PRED, SHAPE
+from wicca.config.aliases import ModelsDict
 
 
-def validate_image(image: np.ndarray) -> None:
-    """
-    Validates the input image by checking its existence, dimensions, type, and pixel value range.
-    Raises an error if any validation fails.
-
-    Args:
-        image (np.ndarray): The input image array to validate.
-
-    Raises:
-        ValueError: If the input image is None.
-        ValueError: If the input image has no dimensions or is empty.
-        ValueError: If the input image is not in RGB format (does not have 3 channels).
-        ValueError: If the input image type is not np.uint8.
-        ValueError: If the input image pixel values exceed the range of 0 to 255.
-    """
-    if image is None:
-        raise ValueError("Image didn't found. Please check your input.")
-    if image.shape[0] == 0 or image.shape[1] == 0 or image.size == 0:
-        raise ValueError("Image is empty")
-    if image.dtype != np.uint8:
-        raise ValueError("Image must be of type uint8")
-    if np.max(image) > 255:
-        raise ValueError("Image pixel values must be between 0 and 255")
-
-
-def load_image(file_path: str) -> Optional[np.ndarray]:
+def load_image(file_path: str) -> np.ndarray | None:
     """
     Loads an image from a file path and converts it to RGB format if it is a color image.
 
@@ -115,3 +99,61 @@ def get_padded_copy(image: np.ndarray, ratio: int, border_type: int = cv2.BORDER
     border_value = border_constant if channels == 1 else [border_constant] * channels
     return cv2.copyMakeBorder(image, 0, rows_to_add, 0, cols_to_add, border_type,
                               None, border_value)
+
+
+def load_single_model(model_class,
+                      shape: tuple[int, int] = (224, 224),
+                      weights: str = 'imagenet'
+                      ) -> dict | None:
+    """
+    Load a classifier model with error handling.
+
+    Args:
+        model_class: Model class to instantiate
+        shape: Input shape tuple (height, width)
+        weights: Pre-trained weights to use, defaults to 'imagenet'
+
+    Returns:
+        Dictionary containing model and its associated functions, or None if loading fails
+    """
+    try:
+        # Get the module containing the model function
+        module = sys.modules[model_class.__module__]
+
+        return {
+            MODEL: model_class(weights=weights),
+            PRE_INP: getattr(module, 'preprocess_input'),
+            DEC_PRED: getattr(module, 'decode_predictions'),
+            SHAPE: shape
+        }
+    except Exception as e:
+        logging.error(f"Error loading: {str(e)}")
+        return None
+
+
+def load_models(models: ModelsDict) -> dict[str, Any]:
+    """
+    Load multiple image classification models with progress tracking.
+
+    Args:
+        models: Dictionary mapping model names to either:
+               - a model class, or
+               - a tuple of (model_class, config_dict)
+
+    Returns:
+        Dictionary mapping model names to loaded classifier instances
+    """
+    classifiers_dict = {}
+
+    with tqdm(models.items(), desc="Loading classifiers", bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]') as pbar:
+        for name, model_info in pbar:
+            # Check if this is a tuple (model with config) or just a model class
+            if isinstance(model_info, tuple):
+                model_class, kwargs = model_info
+            else:
+                model_class = model_info
+                kwargs = {}
+
+            classifiers_dict[name] = load_single_model(model_class, **kwargs)
+
+        return classifiers_dict

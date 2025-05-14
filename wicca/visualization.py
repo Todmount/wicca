@@ -5,21 +5,20 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Tuple, Union, List, TYPE_CHECKING
+from typing import TYPE_CHECKING#,Tuple, Union, List
 
-from utility.classifying_tools import normalize_depth
-from utility.data_loader import validate_image
+from wicca.normalization import normalize_depth
+from wicca.validation import validate_image
+from wicca.config.aliases import Depth
 
 if TYPE_CHECKING:
     import pandas as pd
-
-Depth = Union[int, Tuple[int, ...], List[int], range]
 
 
 def show_image_vs_icon(image: np.ndarray,
                        depth_value: Depth,
                        coder,
-                       figsize: Tuple[int, int] = None
+                       figsize: tuple[int, int] = None
                        ) -> None:
     """
     Displays a series of images showcasing the original image alongside its transformed
@@ -37,7 +36,6 @@ def show_image_vs_icon(image: np.ndarray,
 
     Raises:
         ValueError: If the `image` parameter is None.
-
     """
     # Validation
     validate_image(image)
@@ -97,7 +95,7 @@ def show_icon_on_image(image: np.ndarray,
                        coder,
                        border_width: int = 1,
                        border_color: tuple = (255, 255, 255),
-                       figsize: Tuple[int, int] = None
+                       figsize: tuple[int, int] = None
                        ) -> None:
     """
     Visualizes the Discrete Wavelet Transform (DWT) of an image by displaying the original image
@@ -168,7 +166,6 @@ def visualize_comparison(comparison_data: 'pd.DataFrame', metric: str, title: st
         ValueError: If `comparison_data` is empty.
         ValueError: If the `metric` is not found in the columns of `comparison_data`.
         ValueError: If any dimension in `figsize` is non-positive.
-
     """
 
     if comparison_data.empty:
@@ -203,7 +200,7 @@ def visualize_comparison(comparison_data: 'pd.DataFrame', metric: str, title: st
     plt.show()
 
 
-def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -> None:
+def plot_metric_radar(names, metric, title: str = None, min_value: int = None, max_value: int = 100) -> None:
     fig = go.Figure(data=go.Scatterpolar(
         r=metric,
         theta=names,
@@ -225,13 +222,17 @@ def plot_metric_radar(names, metric, title: str = None, min_value: int = None) -
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[minimum, max(metric)],
+                range=[minimum, max_value],
                 angle=360,
                 tickangle=0
             ),
         ),
         showlegend=False,
-        title=title
+        title=dict(
+            text=title,
+            x=0.5,  # 0.5 for center alignment
+            xanchor='center'
+        )
     )
     fig.show()
 
@@ -252,12 +253,12 @@ def plot_compare_metrics(names, metric1, metric2, xlabel: str = None, ylabel: st
     # Adjust text positioning
     fig.update_traces(textposition='top center', marker_size=12)
     # Add a line for reference
-    fig.add_shape(
-        type="line",
-        x0=min(metric1) * 0.95,
-        y0=min(metric2) * 0.95,
-        x1=max(metric1) * 1.05,
-        y1=max(metric2) * 1.05,
-        line=dict(color="Gray", width=1, dash="dash")
-    )
+    # fig.add_shape(
+    #     type="line",
+    #     x0=min(metric1) * 0.95,
+    #     y0=min(metric2) * 0.95,
+    #     x1=max(metric1) * 1.05,
+    #     y1=max(metric2) * 1.05,
+    #     line=dict(color="Gray", width=1, dash="dash")
+    # )
     fig.show()

@@ -5,162 +5,42 @@ import random
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Callable, List, Optional, Tuple, Union
+from typing import Any
+from collections.abc import Iterable
 
 import cv2
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 from functools import wraps
+import tensorflow as tf
 
-from utility.data_loader import load_image
-from settings.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
+import wicca.result_manager as rsltmgr
+from wicca.data_loader import load_image
+from wicca.normalization import normalize_depth
+from wicca.validation import validate_input_folder, validate_output_folder
+from wicca.config.aliases import Depth
+from wicca.config.constants import MODEL, PRE_INP, DEC_PRED, SHAPE, SOURCE, ICON, RESULTS_FOLDER, MAX_INFO_SAMPLE_SIZE
 
-if 'ipykernel' in sys.modules:
-    from IPython.display import display, Markdown
-    from tqdm.notebook import tqdm
-else:
-    from tqdm import tqdm
-
-# Logging message formatting
+# Basic configs
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 # logging.getLogger().setLevel(logging.INFO)
-
-# Type aliases
-ModelClass = Callable
-ModelWithConfig = Tuple[ModelClass, Dict[str, Any]]  # For models with config like NASNetLarge
-ModelsDict = Dict[str, Union[ModelClass, ModelWithConfig]]
-Depth = Union[int, Tuple[int, ...], List[int], range]
-
-# Value for tqdm bar
 bar_format = '{desc}: {percentage:3.0f}%|{bar}|[{elapsed}]'
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# tf.get_logger().setLevel('ERROR')
 
 
-def load_single_model(model_class,
-                      shape: Tuple[int, int] = (224, 224),
-                      weights: str = 'imagenet'
-                      ) -> Optional[dict]:
-    """
-    Load a classifier model with error handling.
-
-    Parameters:
-        model_class: Model class to instantiate
-        shape: Input shape tuple (height, width)
-        weights: Pre-trained weights to use, defaults to 'imagenet'
-
-    Returns:
-        Dictionary containing model and its associated functions, or None if loading fails
-    """
-    try:
-        # Get the module containing the model function
-        module = sys.modules[model_class.__module__]
-
-        return {
-            MODEL: model_class(weights=weights),
-            PRE_INP: getattr(module, 'preprocess_input'),
-            DEC_PRED: getattr(module, 'decode_predictions'),
-            SHAPE: shape
-        }
-    except Exception as e:
-        logging.error(f"Error loading: {str(e)}")
-        return None
-
-
-def load_models(models: ModelsDict) -> Dict[str, Any]:
-    """
-    Load multiple image classification models with progress tracking.
-
-    Args:
-        models: Dictionary mapping model names to either:
-               - a model class, or
-               - a tuple of (model_class, config_dict)
-
-    Returns:
-        Dictionary mapping model names to loaded classifier instances
-    """
-    start = time.time()
-    classifiers_dict = {}
-
-    with tqdm(models.items(), desc="Loading classifiers", bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}]') as pbar:
-        for name, model_info in pbar:
-            # Check if this is a tuple (model with config) or just a model class
-            if isinstance(model_info, tuple):
-                model_class, kwargs = model_info
-            else:
-                model_class = model_info
-                kwargs = {}
-
-            classifiers_dict[name] = load_single_model(model_class, **kwargs)
-
-        end = time.time()
-        # print(f'Total of {len(classifiers_dict)} classifiers loaded in {end - start:.2f} seconds\n')
-        return classifiers_dict
-
-
-def get_prediction(image: np.ndarray,
-                   classifier: dict,
-                   top: int = 5
-                   ) -> list:
-    """
-      Returns top predictions for the given image using the specified classifier
-
-      Parameters:
-          image (numpy.ndarray): The loaded image to be classified
-          classifier (dict): image classifier
-          top (int): number of top predicted classes
-
-      Returns:
-          predictions for the image
-    """
-    model = classifier[MODEL]
-    preprocess_input = classifier[PRE_INP]
-    decode_predictions = classifier[DEC_PRED]
-
-    x = np.expand_dims(image, axis=0)
-    x = preprocess_input(x)
-    preds = model.predict(x)
-
-    return decode_predictions(preds, top=top)
-
-
-def normalize_depth(depth: Depth):
-    """
-    Normalizes the given depth input.
-
-    The function ensures the provided `depth` is converted into a uniform tuple of
-    integers, ensuring compatibility and usability in further operations. It raises
-    errors if the input does not conform to the expected types and conditions.
-
-    Args:
-        depth: The depth input to be normalized. It can be an integer greater than
-            0, a tuple, a list, or a range. A `None` value and invalid types will
-            raise respective errors.
-
-    Returns:
-        A tuple of integers representing the normalized depth.
-
-    Raises:
-        ValueError: If depth is not provided (None).
-        ValueError: If depth is not a positive integer, tuple, list, or range.
-        ValueError: If any element in the depth is not an integer.
-    """
-    if depth is None:
-        raise ValueError("Depth must be provided")
-    if isinstance(depth, int) and depth > 0:
-        depth = (depth,)
-    if isinstance(depth, (tuple, list, range)):
-        depth = tuple(depth)
-    else:
-        raise ValueError("Depth must be a positive integer, tuple, list, or range")
-    if all(isinstance(x, int) and x > 0 for x in depth):
-        return depth
-    else:
-        raise ValueError("All depths must be integers greater than 0")
+def is_jupyter():
+    """Check if the code is running in the jupyter notebook."""
+    return True if 'ipykernel' in sys.modules else False
 
 
 def preserve_depth(func):
-    """Decorator that preserves the original depth value.
+    """
+    Decorator that preserves the original depth value.
     Saves depth at the start of function and restores it at the end,
-    regardless of any changes made within the function."""
+    regardless of any changes made within the function.
+    """
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -206,69 +86,6 @@ def format_proc_time(start: float, end: float) -> str:
     return time_str
 
 
-def _normalize_folder(folder: Union[str, Path]) -> Path:
-    """Normalizes a folder path"""
-    if not isinstance(folder, (Path, str)):
-        msg = f"Invalid input type: {type(folder)}. Expected str or Path."
-        logging.error(msg)
-        raise TypeError(msg)
-    return Path(folder)
-
-
-def _handle_folder_errors(folder: Union[str, Path], ftype: str = 'data') -> Path:
-    """Handles folder-related errors"""
-    folder = _normalize_folder(folder)
-    if not folder.exists() and ftype == 'data':
-        msg = f"Provided {ftype} folder: '{folder}' does not exist."
-        logging.error(msg)
-        raise FileNotFoundError(msg)
-    elif not folder.exists():
-        msg = f"Provided {ftype} folder: '{folder}' does not exist.\nCreating folder..."
-        logging.warning(msg)
-        folder.mkdir(parents=True, exist_ok=True)
-    if not folder.is_dir():
-        msg = f"Provided {ftype} folder: '{folder}' is not a directory."
-        logging.error(msg)
-        raise NotADirectoryError(msg)
-    try:
-        # Test access permissions by listing contents
-        next(folder.iterdir(), None)
-    except PermissionError:
-        msg = f"Provided {ftype} folder: '{folder}' is not accessible."
-        logging.error(msg)
-        raise PermissionError(msg)
-
-    return folder
-
-
-def validate_input_folder(folder: Union[str, Path], ftype: str = 'data') -> Optional[Path]:
-    """Validates a data folder path"""
-    folder = _handle_folder_errors(folder, ftype)
-
-    # Check if folder is empty
-    if not any(folder.iterdir()):
-        msg = f"The folder '{folder}' is empty. Please provide a non-empty folder. \nExiting... \n"
-        logging.error(msg)
-        raise ValueError(msg)
-
-    return folder
-
-
-def validate_output_folder(folder: Union[str, Path], ftype: str = 'result') -> Optional[Path]:
-    """Validates results folder path"""
-    folder = _handle_folder_errors(folder, ftype)
-
-    # Check if folder is not empty and prompt user
-    if any(folder.iterdir()):
-        user_input = input(
-            f"Warning: The folder '{folder}' is not empty. Some of the files may be overwritten. \nContinue? ([y]/n): ").strip().lower()
-        if user_input in {"n", "no", "not", "-", "nuh"}:
-            logging.info("User chose not to overwrite existing results. \nExiting...")
-            sys.exit(0)
-
-    return folder
-
-
 class ClassifierProcessor:
     """
     Handles the processing of classifiers. See __init__ for more details.
@@ -279,29 +96,33 @@ class ClassifierProcessor:
     """
 
     def __init__(self,
-                 data_folder: Union[str, Path],
+                 data_folder: str | Path,
                  wavelet_coder: Any,
                  transform_depth: Depth,
                  interpolation: int,
                  top_classes: int,
-                 result_manager,
-                 results_folder: Union[str, Path] = RESULTS_FOLDER,
-                 log_info: bool = True):
+                 # result_manager,
+                 results_folder: str | Path = RESULTS_FOLDER,
+                 log_info: bool = True,
+                 parallel: int = None,
+                 batch_size: int = 25):
         """
         Initializes an instance of a class and validates input parameters to ensure they
         comply with expected types and values. Handles potential issues with the `depth`
         parameter by normalizing it and ensures a valid results folder is assigned.
 
         Args:
-            data_folder (Union[str, Path]): The path to the resources or directory.
+            data_folder (str | Path): The path to the resources or directory.
             wavelet_coder (module): Module containing the wavelet processing logic.
             transform_depth (Depth): Provided depth. It can be int, tuple, list, or range. All elements must be positive integers.
             interpolation (int): Configures interpolation level for operations.
             top_classes (int): Limits the number of classes to be compared for each image and icon.
             result_manager (module): Module containing the results management logic.
-            results_folder (Union[str, Path]): Directory for storing results; falls back to
+            results_folder (str | Path): Directory for storing results; falls back to
                 a default path if the provided value is invalid.
             log_info (bool): Controls whether to log information about the initialized instance.
+            parallel (int): Controls the number of parallel threads to use for processing. Defaults to unlimited.
+            batch_size (int): Controls the number of images to process in each batch. Defaults to 25.
         """
         self.path = validate_input_folder(data_folder)
         self.coder = wavelet_coder
@@ -314,8 +135,10 @@ class ClassifierProcessor:
             raise ValueError(msg)
         self.interpolation = interpolation
         self.results_folder = validate_output_folder(results_folder)
-        self.rsltmgr = result_manager
+        # self.rsltmgr = result_manager
         self._log_init_info() if log_info else None
+        self.parallel = parallel
+        self.batch_size = batch_size
 
     def _log_init_info(self):
         """Logs information about the initialized instance"""
@@ -353,7 +176,7 @@ class ClassifierProcessor:
                     width.append(img.shape[1])
                     height.append(img.shape[0])
                 except Exception as e:
-                    logging.warning(f"Error reading image {img_path}: {e}")
+                    logging.warning(f"Unexpected error reading image {img_path}: {e} \nSkipping... \n")
                     continue
 
             if width and height:
@@ -371,11 +194,12 @@ class ClassifierProcessor:
                     res_info = f"{(int(mean_resolution))} pixels"
 
             # Use a cleaner output approach for Jupyter
-            if 'ipykernel' in sys.modules:
+            if is_jupyter():
+                from IPython.display import display, Markdown
                 summary = f"""
 #### Image Processing Configuration
 Note: For image stats was taken a sample of {sample_size} random images.
-You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.
+You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the config.constants module.
 - **Data folder:** {self.path}
 - **Number of images:** {image_count}
 - **Mean image dimensions:** {imgs_dims}
@@ -389,7 +213,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
             else:
                 # Regular logging for non-Jupyter environments
                 print(f"\nNote: For image stats was taken a sample of {sample_size} random images."
-                      "\nYou may change the max sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants module.")
+                      "\nYou may change the max sample size [MAX_INFO_SAMPLE_SIZE] in the config.constants module.")
                 print(f"Data folder: {self.path}")
                 print(f"Number of images: {image_count}")
                 print(f"Mean image dimensions: {imgs_dims}")
@@ -398,6 +222,8 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 print(f"Interpolation: {interpolation_name}")
                 print(f"Top classes: {self.top}")
                 print(f"Results folder: {self.results_folder}")
+
+        time.sleep(0.5) # to prevent output overlapping
 
     def _save_results(self, result: pd.DataFrame, summary: pd.DataFrame, name: str) -> None:
         """
@@ -420,38 +246,98 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         result.to_csv(results_folder / f"{name}-depth-{self.depth}.csv")
         summary.to_csv(results_folder / f"{name}-summary-depth-{self.depth}.csv")
 
+    @tf.function(reduce_retracing=True)
+    def _model_predict(self, model, preprocessed_images):
+        """Dedicated function for model inference with retracing reduction."""
+        return model(preprocessed_images)
 
-    def _classify(self, classifier: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_preds(self, images: np.ndarray, classifier: dict[str, Any]) -> list:
+        """
+        Returns predictions for a batch of images using the specified classifier.
+
+        Args:
+            images (numpy.ndarray): Batch of images with shape (batch_size, height, width, channels)
+            classifier (dict): Image classifier dictionary
+
+        Returns:
+            List of decoded predictions for each image
+        """
+        model = classifier[MODEL]
+        preprocess_input = classifier[PRE_INP]
+        decode_predictions = classifier[DEC_PRED]
+
+        # Preprocess the batch
+        preprocessed_images = preprocess_input(images)
+        preprocessed_images = tf.cast(preprocessed_images, tf.float32)
+
+        # Get raw predictions
+        # preds = model.predict(preprocessed_images, verbose=0)
+        preds = self._model_predict(model, preprocessed_images)
+        preds_np = preds.numpy()
+
+        # Decode and return predictions for each image in the batch
+        return [decode_predictions(preds_np[i:i + 1], top=self.top) for i in range(len(images))]
+
+    def _get_img_batch(self, file_paths: Iterable, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Prepares batches of images and their corresponding icons.
+
+        Args:
+            file_paths: List of paths to image files
+            shape: Target shape for resizing
+
+        Returns:
+            Tuple of (batch_images, batch_icons)
+        """
+
+        batch_images = []
+        batch_icons = []
+
+        for path in file_paths:
+            image = load_image(path)
+
+            resized = cv2.resize(image, shape, interpolation=self.interpolation)
+
+            icon = self.coder.get_small_copy(image, self.depth)
+            resized_icon = cv2.resize(icon, shape, interpolation=self.interpolation)
+
+            batch_images.append(resized)
+            batch_icons.append(resized_icon)
+
+        return np.stack(batch_images), np.stack(batch_icons)
+
+    def _classify(self, classifier: dict[str, Any]) -> dict[str, Any]:
         """
         Returns top predictions for the images and their icons.
 
         Args:
-             classifier ( Dict[str, Any]): image classifier
+             classifier (Dict[str, Any]): image classifier
 
         Returns:
             predictions for each image in the folder
         """
         dir_list = os.listdir(self.path)
+        results = {}
 
-        results = dict()
+        # Process images in smaller batches to manage memory
+        for i in range(0, len(dir_list), self.batch_size):
+            batch_files = dir_list[i:i + self.batch_size]
+            file_paths = [self.path / file_name for file_name in batch_files]
 
-        for file_name in dir_list:
-            image = load_image(self.path / file_name)
+            batch_images, batch_icons = self._get_img_batch(file_paths, classifier[SHAPE])
 
-            resized = cv2.resize(image, classifier[SHAPE], interpolation=self.interpolation)
+            img_preds = self._get_preds(batch_images, classifier)
+            icon_preds = self._get_preds(batch_icons, classifier)
 
-            resized_predictions = get_prediction(resized, classifier)
-
-            icon = self.coder.get_small_copy(image, self.depth)
-            resized_icon = cv2.resize(icon, classifier[SHAPE], interpolation=self.interpolation)
-
-            icon_predictions = get_prediction(resized_icon, classifier, self.top)
-
-            results[file_name] = {SOURCE: resized_predictions, ICON: icon_predictions}
+            for file_name, img_pred, icon_pred in zip(batch_files, img_preds, icon_preds):
+                results[file_name] = {
+                    SOURCE: img_pred,
+                    ICON: icon_pred
+                }
 
         return results
 
-    def _process_core(self, item: Tuple[str, dict]) -> Tuple[str, pd.DataFrame]:
+    def _process_core(self, item: tuple[str, dict]) -> tuple[str, pd.DataFrame]:
         """
         Processes a given item using the provided classifier and saves the resulting
         data.
@@ -467,21 +353,24 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         Returns:
             A tuple containing the name of the classifier and the summary dataframe
             generated from the classification results.
-
         """
         name, classifier = item
         res = self._classify(classifier)
 
         # Using the rsltmgr module correctly as passed in the constructor
-        res_df = self.rsltmgr.get_short_comparison(res, self.top)
+        res_df = rsltmgr.get_short_comparison(res, self.top)
+        res_df.index.name = "index"
+
         sum_df = res_df.describe()
+        sum_df = sum_df.loc[['mean', 'min', 'max']]  # Keep only these rows
+        sum_df.index.name = "stat"
 
         # Save CSV files inside the "results" folder
         self._save_results(res_df, sum_df, name)
 
         return name, sum_df
 
-    def _parallel_proc(self, classifiers: Dict[str, Any], timeout: int = None) -> Dict[str, Any]:
+    def _parallel_proc(self, classifiers: dict[str, Any], timeout: int = None) -> dict[str, Any] | None:
         """
         Processes multiple classifiers using parallel threads.
 
@@ -506,32 +395,34 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 in case of exceptions such as TimeoutError or ValueError.
         """
         results = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit all tasks
-            futures = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel) as executor:
+            # Create a dictionary mapping futures to their keys for identification
+            future_to_key = {}
             for key, value in classifiers.items():
                 future = executor.submit(self._process_core, (key, value))
-                futures[key] = future
+                future_to_key[future] = key
 
-            # Process results with timeout
-            for key, future in tqdm(futures.items(), desc=f"Processing depth {self.depth}", bar_format=bar_format):
+            # Process results as they complete
+            with tqdm(total=len(future_to_key), desc=f"Processing depth {self.depth}",
+                      bar_format=bar_format, mininterval=1) as pbar:
                 try:
-                    # This will wait up to timeout seconds for this specific classifier
-                    result = future.result(timeout=timeout)
-                    results[key] = result
-                    # print(f"Classifier {key} processed successfully")
+                    # Process futures as they complete with timeout for the entire process
+                    for future in concurrent.futures.as_completed(future_to_key.keys(), timeout=timeout):
+                        key = future_to_key[future]
+                        try:
+                            result = future.result()
+                            results[key] = result
+                        except Exception as exc:
+                            logging.warning(f"Classifier {key} generated an exception: {exc}")
+                        finally:
+                            pbar.update(1)
                 except concurrent.futures.TimeoutError:
-                    logging.warning(f"Classifier {key} timed out after {timeout} seconds. Skipping...")
-                    # Cancel the future if possible (may not work if already running)
-                    future.cancel()  # don't work as expected
-                except Exception as e:
-                    logging.warning(f"Error processing classifier {key}: {str(e)}")
-                    # raise e
-        # print(f"Processed {len(results)} out of {len(classifiers)} classifiers")
+                    logging.warning(f"Overall processing timed out after {timeout} seconds")
+
         return results
 
     def _single_classifier(self, name: str,
-                           classifier_dict: Dict[str, Any],
+                           classifier_dict: dict[str, Any],
                            timeout: int = None
                            ):
         """
@@ -577,8 +468,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         explains common errors.
 
         Returns:
-        --------
-        The result from process_single_classifier or None if an error occurs
+            The result from process_single_classifier or None if an error occurs
         """
         try:
             return self._single_classifier(*args, **kwargs)
@@ -605,7 +495,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
 
     @preserve_depth
     def process_classifiers(self,
-                            classifiers: Dict[str, Any],
+                            classifiers: dict[str, Any],
                             timeout: int = None
                             ):
         """
@@ -623,6 +513,8 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
         Raises:
             Exception: If attempting to process a single classifier by mistake .
         """
+        results = {}
+        start_time = time.time()
 
         # Handle a single classifier
         if MODEL in classifiers:
@@ -635,9 +527,6 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
             raise Exception("Big Brother is watching you...\n"
                             "If you want to proceed try another timeout\n")
 
-        results = {}
-
-        start_time = time.time()
         for depth in self.depth:
             self.depth = depth
             if isinstance(self.depth, int) and self.depth > 0:
@@ -651,10 +540,7 @@ You may change the sample size [MAX_INFO_SAMPLE_SIZE] in the settings.constants 
                 print(f"Depth '{depth}' not valid. Skipping...\n")
 
         end_time = time.time()
-        logging.info(f"Total processing time: {int(end_time - start_time)} seconds")  # for debug
+        logging.info(f"Total processing time (log): {int(end_time - start_time)} seconds")  # for debug
 
-        # total_time = format_proc_time(start_time, end_time)
-        # print(f"Total processing time: {total_time}")  # for user
-        # You can uncomment this in case you want to see resulting dict for debugging
-        # Be aware, that output will become cumbersome
-        # return results
+        total_time = format_proc_time(start_time, end_time)
+        print(f"Total processing time: {total_time}")  # for user

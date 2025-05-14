@@ -1,9 +1,4 @@
-,similar classes (count),similar classes (%),similar best class
-count,130.0,130.0,130.0
+stat,similar classes (count),similar classes (%),similar best class
 mean,4.7384615384615385,94.76923076923077,92.3076923076923
-std,0.5645035708079968,11.290071416159947,26.750018808613564
 min,1.0,20.0,0.0
-25%,5.0,100.0,100.0
-50%,5.0,100.0,100.0
-75%,5.0,100.0,100.0
 max,5.0,100.0,100.0

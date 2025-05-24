@@ -2,7 +2,7 @@
 *A framework for exploring wavelet compression effects on image classification*
 
 ## 📌 Overview
-WICCA is a research-driven framework that investigates how wavelet-based image compression affects classification performance. The primary focus is on reducing high-resolution images (>2000px) into compact representations while maintaining classification accuracy. Currently, the framework is centered on Haar wavelet compression
+WICCA is a research-driven framework that investigates how wavelet-based image compression affects classification performance. The primary focus is on reducing high-resolution images into compact representations while maintaining classification accuracy. Currently, the framework is centered on Haar wavelet compression
 
 ## 🎯 Project Goals
 ### 🌍 Global Goal
@@ -45,16 +45,13 @@ As for now, please refer to the **demo.ipynb**
 - [x] Implement Haar wavelet compression
 - [x] Implement comparison functionality by various conversion depth and classifiers
 - [x] Add a side-by-side visualization of the original image and its icon
-- [ ] Implement minimal Flask MVP
-- [ ] Dockerize the project
 - [ ] Extend to other wavelets (Daubechies, Coiflet, etc.)
+- [ ] Dockerize the project
+- [ ] Implement minimal Flask MVP
 - [ ] Optimize for large-scale datasets
 
 ## 🤝 Contributing
 Contributions are welcome! Feel free to open an issue or submit a pull request.
-
-## 📜 Lic
-This project is licensed under the MIT License.
 
 ## Contact
 For inquiries or collaborations, reach out via [todmount@gmail.com].

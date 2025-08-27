@@ -43,16 +43,24 @@ WICCA is a research-driven framework for investigating how wavelet-based image c
 
 ## Installation
 
+<details>
+   <summary>Requirements</summary>
+
+   - Python 3.12+
+   - Conda
+
+</details>
+
 1. **Clone the repository**
    ```bash
    git clone https://github.com/your-username/WICCA.git
    cd WICCA
    ```
 
-2. **Set up virtual environment**
+2. **Set up a conda environment**
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   conda create -n wicca python=3.12
+   conda activate wicca
    ```
 
 3. **Install dependencies**

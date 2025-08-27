@@ -1,3 +1,8 @@
+> ⚠️ Status: Deprecated   
+This project is no longer actively maintained. It was originally developed as part of my master’s thesis. 
+While the code remains available for reference, it may not receive updates.
+
+
 <!-- Project name: caps "WICCA" and "Wavelet-based Image Compression & Classification Analysis" underneath both in 41b883 color-->
 <p align="center" title="Project name" alt="WICCA: Wavelet-based Image Compression and Classification Analysis">
    <img src="https://res.cloudinary.com/dxteec1w4/image/upload/v1756250680/wicca_ohxi8t.png" >

@@ -1,50 +1,55 @@
-> ⚠️ Status: Deprecated   
-This project is no longer actively maintained. It was originally developed as part of my master’s thesis. 
-While the code remains available for reference, it may not receive updates.
+> ⚠️ Status: On pause due to career shift.   
+> This project is no longer actively maintained. It was originally developed as part of my master’s thesis. While the code remains available for reference, it may not receive updates.
 
+<div>&#8287</div>
 
 <!-- Project name: caps "WICCA" and "Wavelet-based Image Compression & Classification Analysis" underneath both in 41b883 color-->
 <p align="center" title="Project name" alt="WICCA: Wavelet-based Image Compression and Classification Analysis">
    <img src="https://res.cloudinary.com/dxteec1w4/image/upload/v1756250680/wicca_ohxi8t.png" >
 </p>
 
+
 <!-- Project specific badges -->
 <p align="center">
   <a href="https://python.org" title="Supported python versions" alt="Supported python versions">
-    <img src="https://img.shields.io/badge/Python-3.12+-blue.svg">
-  </a>
+    <img src="https://img.shields.io/badge/Python-3.12+-blue.svg"></a>
   <a href="LICENSE" title="License" alt="License">
-    <img src="https://img.shields.io/badge/License-GNU%20GPL-yellow">
-  </a>
+    <img src="https://img.shields.io/badge/License-GNU%20GPL&#8208;3-yellow"></a>
   <a href="https://github.com/psf/black" title="Code style" alt="Code style: black">
-    <img src="https://img.shields.io/badge/Code%20Style-black-000000.svg">
-  </a>
+    <img src="https://img.shields.io/badge/Code%20style-black-000000.svg"></a>
 </p>
 
+
 ## Overview
-WICCA is a research-driven framework for investigating how wavelet-based image compression and scaling affect the classification performance of pretrained models. WICCA leverages [Discrete Wavelet Transform (DWT)](https://en.wikipedia.org/wiki/Discrete_wavelet_transform) to generate compressed icons — small representations of images extracted from wavelet decomposition. At the moment, [Haar wavelet](https://en.wikipedia.org/wiki/Haar_wavelet) compression is implemented as the initial method, with extensions to other wavelets planned. compression method
+WICCA is a research-driven framework for investigating how wavelet-based image compression and scaling affect the classification performance of pretrained models. WICCA leverages [Discrete Wavelet Transform (DWT)](https://en.wikipedia.org/wiki/Discrete_wavelet_transform) to generate compressed icons — small representations of images extracted from wavelet decomposition. At the moment, [Haar wavelet](https://en.wikipedia.org/wiki/Haar_wavelet) compression is implemented as the initial method, with extensions to other wavelets planned.
+
 
 ## Project Goals
 ### Global Goal
-- Systematically evaluate how different wavelet compression techniques influence classification across a variety of pretrained models
+- Systematically evaluate how different wavelet compression techniques influence classification across a variety of pretrained models.
+
 
 ### Current Goals
-- Analyze how Haar wavelet compression affects classification performance
-- Compare classification results between original high-resolution images and their compressed counterparts
+- Analyze how Haar wavelet compression affects classification performance.
+- Compare classification results between original high-resolution images and their compressed counterparts.
+
 
 ## How It Works
-- Dataset preparation: Large-scale, high-resolution images (≥2K) are sourced
-- Wavelet compression: Haar decomposition is applied to extract representative icons
-- Model inference: Pre-trained CNN classifiers are used to evaluate both original and compressed images
-- Prediction analysis: Performance is compared using top-1 accuracy match, top-5 class intersection, and prediction similarity
-- Results storage: Outcomes are structured in Pandas DataFrames and exported as .csv
+- Dataset preparation: Large-scale, high-resolution images (≥2K) are sourced.
+- Wavelet compression: Haar decomposition is applied to extract representative icons.
+- Model inference: Pre-trained CNN classifiers are used to evaluate both original and compressed images.
+- Prediction analysis: Performance is compared using top-1 accuracy match, top-5 class intersection, and prediction similarity.
+- Results storage: Outcomes are structured in Pandas DataFrames and exported as .csv.
+
 
 ## Core Functionality
-✅ Supports large-image datasets  
-✅ Supports multiple CNN architectures  
-✅ Uses pre-trained models: no model training required  
-✅ Enables structured analysis, comparing classification results between original images and their wavelet-compressed counterparts  
-✅ Developed to use in Jupyter Notebook, but can be used as a CLI
+✅ Supports high-resolution image datasets.  
+✅ Supports multiple CNN architectures.  
+✅ Uses pre-trained models: no model training required.  
+✅ Enables structured analysis, comparing classification results between original images and their wavelet-compressed counterparts.  
+✅ Developed to use in Jupyter Notebook, but can be used as a CLI.
+✅ Implemented in a way that it's easy to add a new wavelet.
+
 
 ## Installation
 
@@ -73,17 +78,13 @@ WICCA is a research-driven framework for investigating how wavelet-based image c
    pip install -r requirements.txt
    ```
 
-**or**   
-
-Download Docker image (will be provided later)
-
 ## Usage
-> Please refer to the [demonstration notebook](https://github.com/Todmount/wicca/blob/main/demo.ipynb) to see all available functionality  
+> Please refer to the [demonstration notebook](https://github.com/Todmount/wicca/blob/main/demo.ipynb) to see all available functionality.  
 
 Basic usage is as follows:   
 
-0. <details>
-      <summary>Imports</summary>
+<details>
+      <summary>Imports:</summary>
    
    ```python3
    import os
@@ -104,7 +105,7 @@ Basic usage is as follows:
    </details>
    
 
-2. Define the models dictionary in the format as in the example, and load it
+1. Define the models dictionary in the format as in the example, and load it:
    
    ```python3
    models_dict = {
@@ -116,7 +117,7 @@ Basic usage is as follows:
    }
    classifiers = load_models(models_dict)
    ```
-3. Define the processor and call it
+3. Define the processor and call it:
    
    ```python3
    processor = ClassifierProcessor(
@@ -132,7 +133,7 @@ Basic usage is as follows:
    processor.process_classifiers(classifiers, timeout=3600) # timeout for whole process, in seconds
    ```
    <details>
-      <summary>Output: </summary>
+      <summary>Output:</summary>
       
       ```bash
          **Image Processing Configuration**
@@ -160,7 +161,7 @@ Basic usage is as follows:
    
    </details>
    
-5. See the results in table format
+5. See the results in table format:
    ```python3
    results['MobileNetV2'] # direct call to DataFrame will output results for all depth
    rmgr.load_summary_results(results_folder='results', depth = 5, classifier_name='EfficientNetB0') # load csv with specific depth
@@ -178,7 +179,7 @@ Basic usage is as follows:
 
    </details>
    
-6. You could visualize results utilizing built-in functionality
+6. You could visualize results utilizing built-in functionality:
 
    ```python3
    comparison = rmgr.compare_summaries(res_default, classifiers, 5, 'mean')
@@ -210,8 +211,8 @@ Basic usage is as follows:
       <summary>Output:</summary>
       <img src="https://cdn.imgpile.com/f/QrO6Bhc_xl.png" alt="output_heatmap.png">
    </details>
-   
 
+<!---
 ## Roadmap
 - [x] Implement Haar wavelet compression
 - [x] Implement comparison functionality for various conversion depths and classifiers
@@ -220,20 +221,23 @@ Basic usage is as follows:
 - [ ] Write a detailed documentation
 - [ ] Extend to other wavelets (Daubechies, Coiflet, etc.)
 - [ ] Optimize for large-scale datasets
+--->   
 
 <!-- Results -->
 <details>
    <summary><h2>Results & Insights</h2></summary>
    
-   - Haar wavelet compression yields icons that preserve structural features, enabling effective classification
-   - While image size is significantly reduced, essential visual information remains intact  
-   - Compression reduces computational cost but may slightly impact accuracy, depending on the classifier  
-   - Classification accuracy shows model-dependent sensitivity to compression; architectures such as ResNet and NASNet maintain robustness  
+   - Haar wavelet compression yields icons that preserve structural features, enabling effective classification.
+   - While image size is significantly reduced, essential visual information remains intact.  
+   - Compression reduces computational cost but may slightly impact accuracy, depending on the classifier.  
+   - Classification accuracy shows model-dependent sensitivity to compression; architectures such as ResNet and NASNet maintain robustness.  
    
 </details>
 
+
 ## Contributing
-Contributions are welcome! Feel free to open an issue or submit a pull request
+Contributions are welcome! Feel free to open an issue or submit a pull request.
+
 
 ## Contact
-You could find relevant contact info on my [GitHub profile](https://github.com/Todmount) 
+You could find relevant contact info on my [GitHub profile](https://github.com/Todmount). 

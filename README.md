@@ -1,5 +1,3 @@
-<p align="center"><b>❗Currently unusable, fixing dependencies❗</b></p>
-<div>&#8287</div>
 
 > ⚠️ Status: On pause due to career shift.   
 > This project is no longer actively maintained. It was originally developed as part of my master’s thesis. While the code remains available for reference, it may not receive updates.
@@ -7,19 +5,19 @@
 <div>&#8287</div>
 
 <!-- Project name: caps "WICCA" and "Wavelet-based Image Compression & Classification Analysis" underneath both in 41b883 color-->
-<p align="center" title="Project name" alt="WICCA: Wavelet-based Image Compression and Classification Analysis">
-   <img src="https://res.cloudinary.com/dxteec1w4/image/upload/v1756250680/wicca_ohxi8t.png" >
+<p align="center" title="Project name">
+   <img src="https://res.cloudinary.com/dxteec1w4/image/upload/v1756250680/wicca_ohxi8t.png" alt="WICCA: Wavelet-based Image Compression and Classification Analysis">
 </p>
 
 
-<!-- Project specific badges -->
+<!-- Project-specific badges -->
 <p align="center">
-  <a href="https://python.org" title="Supported python versions" alt="Supported python versions">
-    <img src="https://img.shields.io/badge/Python-3.12+-blue.svg"></a>
-  <a href="LICENSE" title="License" alt="License">
-    <img src="https://img.shields.io/badge/License-GNU%20GPL&#8208;3-yellow"></a>
-  <a href="https://github.com/psf/black" title="Code style" alt="Code style: black">
-    <img src="https://img.shields.io/badge/Code%20style-black-000000.svg"></a>
+  <a href="https://python.org" title="Supported python versions">
+    <img src="https://img.shields.io/badge/Python-3.12+-blue.svg" alt="Python 3.12+"></a>
+  <a href="LICENSE" title="License" >
+    <img src="https://img.shields.io/badge/License-GNU%20GPLv3-yellow" alt="License"></a>
+  <a href="https://github.com/psf/black" title="Code style">
+    <img src="https://img.shields.io/badge/Code%20style-black-000000.svg" alt="Code style: black"></a>
 </p>
 
 
@@ -50,8 +48,8 @@ WICCA is a research-driven framework for investigating how wavelet-based image c
 ✅ Supports multiple CNN architectures.  
 ✅ Uses pre-trained models: no model training required.  
 ✅ Enables structured analysis, comparing classification results between original images and their wavelet-compressed counterparts.  
-✅ Developed to use in Jupyter Notebook, but can be used as a CLI.
-✅ Implemented in a way that it's easy to add a new wavelet.
+✅ Developed to use in Jupyter Notebook but can be used as a CLI.
+✅ Implemented in a way that it's manageable to add a new wavelet.
 
 
 ## Installation
@@ -60,7 +58,6 @@ WICCA is a research-driven framework for investigating how wavelet-based image c
    <summary>Requirements</summary>
 
    - Python 3.12+
-   - Conda
 
 </details>
 
@@ -70,10 +67,10 @@ WICCA is a research-driven framework for investigating how wavelet-based image c
    cd WICCA
    ```
 
-2. **Set up a conda environment**
+2. **Set up a virtual environment**
    ```bash
-   conda create -n wicca python=3.12
-   conda activate wicca
+   python3 -m venv .venv
+   source .venv/bin/activate # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies**
@@ -108,7 +105,7 @@ Basic usage is as follows:
    </details>
    
 
-1. Define the models dictionary in the format as in the example, and load it:
+1. Define the models' dictionary in the format as in the example and load it:
    
    ```python3
    models_dict = {
@@ -120,7 +117,7 @@ Basic usage is as follows:
    }
    classifiers = load_models(models_dict)
    ```
-3. Define the processor and call it:
+2. Define the processor and call it:
    
    ```python3
    processor = ClassifierProcessor(
@@ -164,7 +161,7 @@ Basic usage is as follows:
    
    </details>
    
-5. See the results in table format:
+3. See the results in table format:
    ```python3
    results['MobileNetV2'] # direct call to DataFrame will output results for all depth
    rmgr.load_summary_results(results_folder='results', depth = 5, classifier_name='EfficientNetB0') # load csv with specific depth
@@ -172,17 +169,17 @@ Basic usage is as follows:
    <details>
       <summary>Output: </summary>
 
-   ||stat|similar classes (count)|similar classes (%)|similar best class|
-   |-|-|-|-|-|
-   |0|mean|4.24|84.92|83.84|
-   |2|min|1.00|20.00|0.00|
-   |3|max|5.00|100.00|100.00|
+   |   | stat | similar classes (count) | similar classes (%) | similar best class |
+   |---|------|-------------------------|---------------------|--------------------|
+   | 0 | mean | 4.24                    | 84.92               | 83.84              |
+   | 2 | min  | 1.00                    | 20.00               | 0.00               |
+   | 3 | max  | 5.00                    | 100.00              | 100.00             |
 
    > The output summarizes mean, min, and max similarity metrics across images
 
    </details>
    
-6. You could visualize results utilizing built-in functionality:
+4. You could visualize results utilizing built-in functionality:
 
    ```python3
    comparison = rmgr.compare_summaries(res_default, classifiers, 5, 'mean')
@@ -221,7 +218,7 @@ Basic usage is as follows:
 - [x] Implement comparison functionality for various conversion depths and classifiers
 - [x] Add a side-by-side visualization of the original image and its icon
 - [ ] Dockerize the project
-- [ ] Write a detailed documentation
+- [ ] Write detailed documentation
 - [ ] Extend to other wavelets (Daubechies, Coiflet, etc.)
 - [ ] Optimize for large-scale datasets
 --->   
@@ -239,7 +236,8 @@ Basic usage is as follows:
 
 
 ## Contributing
-Contributions are welcome! Feel free to open an issue or submit a pull request.
+Though the project is on pause, contributions are welcome!    
+Feel free to open an issue or submit a pull request.
 
 
 ## Contact
